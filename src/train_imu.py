@@ -9,103 +9,99 @@ import cv2
 import pandas as pd
 import torchvision.transforms as T
 from PIL import Image
+import fire
 
 from imagebind.models.imagebind_model import imagebind_huge_imu
 
+# ---------------- 前処理（動画用） ----------------
+IMG_TRANSFORM = T.Compose([
+    T.Resize(224),
+    T.CenterCrop(224),
+    T.ToTensor(),
+    T.Normalize(mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225]),
+])
 
-
+USE_IMU_COLS = [
+    "gyro_x", "gyro_y", "gyro_z",
+    "accl_x", "accl_y", "accl_z",
+]
 
 class IMUDataset(Dataset):
-    """
-    ディレクトリ構成
-    ---------------
-    <data_dir>/
-        imu/    foo_0.csv,  bar_12.csv, ...
-        video/  foo_0.mp4,  bar_12.mp4, ...
-    """
-    def __init__(
-        self,
-        data_dir: str,
-        imu_len: int = 2000,
-        frame_sampling: str = "center",   # "center" or "random"
-        transform=None,
-    ):
+    def __init__(self,
+                 data_dir: str,
+                 imu_len: int = 2000,
+                 frame_sampling: str = "center",
+                 transform=IMG_TRANSFORM):
+        """
+        data_dir/imu   : {uid}_{chunk}.csv
+        data_dir/video : {uid}_{chunk}.mp4
+        """
         super().__init__()
         self.imu_len = imu_len
         self.frame_sampling = frame_sampling.lower()
-        self.transform = transform or T.Compose([
-            T.Resize(224),
-            T.CenterCrop(224),
-            T.ToTensor(),
-            T.Normalize(mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225]),
-        ])
+        self.transform = transform
 
         imu_dir   = os.path.join(data_dir, "imu")
         video_dir = os.path.join(data_dir, "video")
 
-        csv_paths = sorted(glob.glob(os.path.join(imu_dir, "*.csv")))
         self.pairs = []
-        for csv_path in csv_paths:
-            fname   = os.path.basename(csv_path)
-            uid_ch  = os.path.splitext(fname)[0]                 # foo_12
-            mp4_path = os.path.join(video_dir, uid_ch + ".mp4")
+        for csv_path in sorted(glob.glob(os.path.join(imu_dir, "*.csv"))):
+            uidchunk = os.path.splitext(os.path.basename(csv_path))[0]
+            mp4_path = os.path.join(video_dir, uidchunk + ".mp4")
             if os.path.exists(mp4_path):
                 self.pairs.append((csv_path, mp4_path))
             else:
-                print(f"[WARN] video not found for {fname}, skip.")
+                print(f"[WARN] skip: video not found {mp4_path}")
 
-        if len(self.pairs) == 0:
-            raise RuntimeError(f"No imu–video pairs found in {data_dir}")
+        if not self.pairs:
+            raise RuntimeError(f"No usable pairs in {data_dir}")
 
+    # -------------- Dataset インタフェース --------------
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, idx):
         csv_path, mp4_path = self.pairs[idx]
 
-        # ------------------- IMU -------------------
-        df = pd.read_csv(csv_path,
-                         usecols=[
-                             "gyro_x", "gyro_y", "gyro_z",
-                             "accl_x", "accl_y", "accl_z",
-                         ])
-        imu = torch.tensor(df.values, dtype=torch.float32)      # [N, 6]
-        # 長さを固定（truncate / pad）
+        # ---------------- IMU: 必要 6 列だけ読む ----------------
+        df = pd.read_csv(csv_path, usecols=USE_IMU_COLS)
+        imu = torch.tensor(df.values, dtype=torch.float32)  # [L, 6]
+
+        # 長さ固定
         if imu.shape[0] >= self.imu_len:
             imu = imu[:self.imu_len]
         else:
             pad = torch.zeros(self.imu_len - imu.shape[0], 6)
-            imu = torch.cat([imu, pad], dim=0)                  # [L, 6]
+            imu = torch.cat([imu, pad], dim=0)
 
-        # ------------------- VIDEO -----------------
+        # ---------------- VIDEO: 全フレーム取得 ----------------
         cap = cv2.VideoCapture(mp4_path)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open video: {mp4_path}")
+            raise RuntimeError(f"Cannot open video {mp4_path}")
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if self.frame_sampling == "random":
-            fidx = random.randint(0, total_frames - 1)
-        else:                                 # center
-            fidx = total_frames // 2
-
-        cap.set(cv2.CAP_PROP_POS_FRAMES, fidx)
-        success, frame = cap.read()
+        frames = []
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            image = self.transform(Image.fromarray(frame))  # [3,224,224]
+            frames.append(image)
         cap.release()
-        if not success:
-            raise RuntimeError(f"Failed to read frame {fidx} from {mp4_path}")
+        print(mp4_path, len(frames))
+        if len(frames) == 0:
+            raise RuntimeError(f"No frames could be read from {mp4_path}")
 
-        # BGR → RGB → PIL → transform
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img   = Image.fromarray(frame)
-        img   = self.transform(img)           # [3, 224, 224] float32
+        video_tensor = torch.stack(frames, dim=1)  # [3, video_frames, 224, 224]
 
-        return img, imu                      # (vision_tensor, imu_tensor)
+        return video_tensor, imu         # vision_tensor, imu_tensor
 
 def main(
     epochs: int = 8,
     warmup_epochs: int = 2, #TODO
-    batch_size: int = 512,
+    batch_size: int = 128,
     gradient_clipping: float = 1.0,
     data_dir: str = "/large/ego4d/preprocessed/", #TODO
     temperature: float = 0.2,
@@ -118,7 +114,6 @@ def main(
     wandb.login(key="c85b817c62f441243d232b381088358e72fa2b19")
     wandb.init(
         project=project_name,
-        name="imagebind_imu",
         config={
             "model": "imagebind_huge",
             "pretrained": True,
@@ -146,19 +141,20 @@ def main(
     for epoch in range(epochs):
         model.train()
         train_loss = 0
-        for i, (images, imus) in enumerate(train_loader):
+        for i, (videos, imus) in enumerate(train_loader):
+            print(f"Epoch [{epoch + 1}/{epochs}], Step [{i + 1}/{len(train_loader)}]")
             optimizer.zero_grad()
-
-            images = images.to(device, dtype=torch.float32)
-            imus = imus.to(device, dtype=torch.long)
+            videos = videos.to(device, dtype=torch.float32)
+            imus = imus.to(device, dtype=torch.float32)
+            print(f"imus shape: {imus.shape}, videos shape: {videos.shape}")
             with torch.no_grad():
-                Image_f = model.encode_image(images)
+                Image_f = model.encode_image(videos)
             Imu_f = model.encode_imu(imus)
             Image_e = Image_f / Image_f.norm(dim=-1, keepdim=True)
             Imu_e = Imu_f / Imu_f.norm(dim=-1, keepdim=True)
             logits = (Image_e @ Imu_e.T) * exp_temp
 
-            labels = torch.arange(len(images)).to(device)
+            labels = torch.arange(len(videos)).to(device)
             loss_image = criterion(logits, labels)
             loss_imu = criterion(logits.T, labels)
             loss = (loss_image + loss_imu) / 2
@@ -170,8 +166,18 @@ def main(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
             optimizer.step()
             train_loss += loss.item()
-
+            wandb.log(
+                {
+                    "train_loss": loss.item(),
+                    "epoch": epoch + 1,
+                    "step": i + 1,
+                }
+            )
             if i % 100 == 0:
                 print(
                     f"Epoch [{epoch + 1}/{epochs}], Step [{i}/{len(train_loader)}], Loss: {loss.item():.4f}"
                 )
+
+
+if __name__ == "__main__": 
+    fire.Fire(main)  # Allows command line arguments to override defaults

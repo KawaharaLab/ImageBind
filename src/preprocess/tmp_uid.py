@@ -11,12 +11,8 @@ output_file = "data/uids.txt"
 
 with open(input_file, "r") as f:
     content = f.read()
-
     video_uids = content.split()
-
     filtered_uids = [uid for uid in video_uids if uid not in exclude_uids]
-
     filtered_content = " ".join(filtered_uids)
-
     with open(output_file, "w") as f:
         f.write(filtered_content)
