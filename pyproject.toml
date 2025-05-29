@@ -25,6 +25,7 @@ dependencies = [
     "torchaudio>=0.13.1",
     "torchvision>=0.14.1",
     "types-regex>=2024.11.6.20250403",
+    "wandb>=0.19.11",
 ]
 
 
