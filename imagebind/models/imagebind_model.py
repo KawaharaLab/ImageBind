@@ -447,6 +447,9 @@ class ImageBindModel(nn.Module):
         :param images: Input images tensor.
         :return: Encoded image embeddings.
         """
+        if images.ndim >= 5:
+            B, S = images.shape[:2]
+            images = images.reshape(B * S, *images.shape[2:])
         preprocessed = self.modality_preprocessors[ModalityType.VISION](vision=images)
         trunk_inputs = preprocessed["trunk"]
         head_inputs = preprocessed["head"]
@@ -470,6 +473,21 @@ class ImageBindModel(nn.Module):
             encoded_imus, **head_inputs
         )
         return self.modality_postprocessors[ModalityType.IMU](encoded_imus)
+    
+    def encode_text(self, texts):
+        """
+        Encode text into embeddings.
+        :param texts: Input text tensor.
+        :return: Encoded text embeddings.
+        """
+        preprocessed = self.modality_preprocessors[ModalityType.TEXT](text=texts)
+        trunk_inputs = preprocessed["trunk"]
+        head_inputs = preprocessed["head"]
+        encoded_texts = self.modality_trunks[ModalityType.TEXT](**trunk_inputs)
+        encoded_texts = self.modality_heads[ModalityType.TEXT](
+            encoded_texts, **head_inputs
+        )
+        return self.modality_postprocessors[ModalityType.TEXT](encoded_texts)
 
     def forward(self, inputs):
         outputs = {}
@@ -520,7 +538,7 @@ def imagebind_huge(pretrained=False):
     )
 
     if pretrained:
-        if not os.path.exists(".checkpoints/imagebind_huge.pth"):
+        if not os.path.exists("model_imagebind_imu.pth"):
             print(
                 "Downloading imagebind weights to .checkpoints/imagebind_huge.pth ..."
             )
@@ -531,7 +549,7 @@ def imagebind_huge(pretrained=False):
                 progress=True,
             )
 
-        model.load_state_dict(torch.load(".checkpoints/imagebind_huge.pth"))
+        model.load_state_dict(torch.load("model_imagebind_imu.pth"))
 
     return model
 

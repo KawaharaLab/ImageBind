@@ -10,6 +10,7 @@ import pandas as pd
 import torchvision.transforms as T
 from PIL import Image
 import fire
+import numpy as np
 
 from imagebind.models.imagebind_model import imagebind_huge_imu
 
@@ -29,30 +30,34 @@ USE_IMU_COLS = [
 
 class IMUDataset(Dataset):
     def __init__(self,
+                 device,
                  data_dir: str,
+                 txt: str = "data/train.txt",
                  imu_len: int = 2000,
                  frame_sampling: str = "center",
                  transform=IMG_TRANSFORM):
         """
         data_dir/imu   : {uid}_{chunk}.csv
-        data_dir/video : {uid}_{chunk}.mp4
+        data_dir/video_feature : {uid}_{chunk}.pt
         """
         super().__init__()
+        self.device = device
         self.imu_len = imu_len
         self.frame_sampling = frame_sampling.lower()
         self.transform = transform
 
         imu_dir   = os.path.join(data_dir, "imu")
-        video_dir = os.path.join(data_dir, "video")
-
+        video_dir = os.path.join(data_dir, "video_feature")
+        with open(txt, "r") as f:
+            uidchunks = [line.strip() for line in f if line.strip()]
         self.pairs = []
-        for csv_path in sorted(glob.glob(os.path.join(imu_dir, "*.csv"))):
-            uidchunk = os.path.splitext(os.path.basename(csv_path))[0]
-            mp4_path = os.path.join(video_dir, uidchunk + ".mp4")
-            if os.path.exists(mp4_path):
-                self.pairs.append((csv_path, mp4_path))
+        for uidchunk in uidchunks:
+            csv_path = os.path.join(imu_dir, uidchunk + ".csv")
+            pt_path = os.path.join(video_dir, uidchunk + ".pt")
+            if os.path.exists(pt_path) and os.path.exists(csv_path):
+                self.pairs.append((csv_path, pt_path))
             else:
-                print(f"[WARN] skip: video not found {mp4_path}")
+                print(f"[WARN] skip: not found {uidchunk}")
 
         if not self.pairs:
             raise RuntimeError(f"No usable pairs in {data_dir}")
@@ -62,46 +67,32 @@ class IMUDataset(Dataset):
         return len(self.pairs)
 
     def __getitem__(self, idx):
-        csv_path, mp4_path = self.pairs[idx]
+        csv_path, pt_path = self.pairs[idx]
 
         # ---------------- IMU: 必要 6 列だけ読む ----------------
-        df = pd.read_csv(csv_path, usecols=USE_IMU_COLS)
-        imu = torch.tensor(df.values, dtype=torch.float32)  # [L, 6]
+        imu_df = pd.read_csv(csv_path)
+        # gyro_x, gyro_y, gyro_z, accl_x, accl_y, accl_z の 6 列だけ抽出
+        imu_cols = ['gyro_x', 'gyro_y', 'gyro_z', 'accl_x', 'accl_y', 'accl_z']
+        imu_array = imu_df[imu_cols].values.astype('float32')
+        for col in range(len(imu_cols)):
+            # NaN を 0 に置き換え
+            y = imu_array[:, col]
+            x = np.arange(len(y))
+            not_nan = ~np.isnan(y)
+            y_interp = np.interp(x, x[not_nan], y[not_nan])
+            imu_array[:, col] = y_interp
+        imu_tensor = torch.from_numpy(imu_array).T        # → (6, T)
 
-        # 長さ固定
-        if imu.shape[0] >= self.imu_len:
-            imu = imu[:self.imu_len]
-        else:
-            pad = torch.zeros(self.imu_len - imu.shape[0], 6)
-            imu = torch.cat([imu, pad], dim=0)
-
+        imu_tensor = imu_tensor.to(self.device)  # デバイスに転送
         # ---------------- VIDEO: 全フレーム取得 ----------------
-        cap = cv2.VideoCapture(mp4_path)
-        if not cap.isOpened():
-            raise RuntimeError(f"Cannot open video {mp4_path}")
-
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        frames = []
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            image = self.transform(Image.fromarray(frame))  # [3,224,224]
-            frames.append(image)
-        cap.release()
-        print(mp4_path, len(frames))
-        if len(frames) == 0:
-            raise RuntimeError(f"No frames could be read from {mp4_path}")
-
-        video_tensor = torch.stack(frames, dim=1)  # [3, video_frames, 224, 224]
-
-        return video_tensor, imu         # vision_tensor, imu_tensor
+        video_tensor = torch.load(pt_path).to(self.device)
+        video_tensor = video_tensor.mean(dim=0)  # 平均化して [T, 1024] → [1024]
+        return video_tensor, imu_tensor         # vision_tensor, imu_tensor
 
 def main(
     epochs: int = 8,
     warmup_epochs: int = 2, #TODO
-    batch_size: int = 128,
+    batch_size: int = 512,
     gradient_clipping: float = 1.0,
     data_dir: str = "/large/ego4d/preprocessed/", #TODO
     temperature: float = 0.2,
@@ -123,7 +114,7 @@ def main(
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    model.to(device)
+    model.to(device).float()
     exp_temp = torch.tensor(temperature, dtype=torch.float32).exp().to(device)
 
     for name, param in model.named_parameters():
@@ -132,12 +123,11 @@ def main(
         else:
             param.requires_grad = False
 
-    train_dataset = IMUDataset(data_dir=data_dir, imu_len=2000, frame_sampling="center")
+    train_dataset = IMUDataset(data_dir=data_dir, device=device, imu_len=2000, frame_sampling="center")
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, drop_last=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True)
     optimizer = torch.optim.Adam(model.parameters(), lr=peak_lr, weight_decay=weight_decay)
     criterion = torch.nn.CrossEntropyLoss()
-    num_epochs = 10
     for epoch in range(epochs):
         model.train()
         train_loss = 0
@@ -146,11 +136,14 @@ def main(
             optimizer.zero_grad()
             videos = videos.to(device, dtype=torch.float32)
             imus = imus.to(device, dtype=torch.float32)
-            print(f"imus shape: {imus.shape}, videos shape: {videos.shape}")
-            with torch.no_grad():
-                Image_f = model.encode_image(videos)
+            if videos.isnan().any():
+                print(f"NaN detected in videos at Epoch [{epoch + 1}], Step [{i + 1}]")
+                return
+            if imus.isnan().any():
+                print(f"NaN detected in imus at Epoch [{epoch + 1}], Step [{i + 1}]")
+                return
             Imu_f = model.encode_imu(imus)
-            Image_e = Image_f / Image_f.norm(dim=-1, keepdim=True)
+            Image_e = videos / videos.norm(dim=-1, keepdim=True)
             Imu_e = Imu_f / Imu_f.norm(dim=-1, keepdim=True)
             logits = (Image_e @ Imu_e.T) * exp_temp
 
@@ -177,7 +170,8 @@ def main(
                 print(
                     f"Epoch [{epoch + 1}/{epochs}], Step [{i}/{len(train_loader)}], Loss: {loss.item():.4f}"
                 )
-
+    torch.save(model.state_dict(), f"model_{project_name}.pth")
+    print(f"Training complete. Model saved as model_{project_name}.pth")
 
 if __name__ == "__main__": 
     fire.Fire(main)  # Allows command line arguments to override defaults
