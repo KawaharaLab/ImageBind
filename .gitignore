@@ -9,3 +9,4 @@ venv/
 .checkpoints
 data
 uv.lock
+wandb

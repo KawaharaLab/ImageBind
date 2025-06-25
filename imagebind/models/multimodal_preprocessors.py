@@ -683,3 +683,84 @@ class IMUPreprocessor(VerboseNNModule):
             "head": {},
         }
         return return_dict
+
+class ForcePreprocessor(VerboseNNModule):
+    def __init__(
+        self,
+        kernel_size: int,
+        force_stem: PatchEmbedGeneric,
+        embed_dim: int,
+        img_size: Tuple = (15, 3000),
+        num_cls_tokens: int = 1,
+        pos_embed_fn: Optional[Callable] = None,
+        init_param_style: str = "openclip",
+    ) -> None:
+        super().__init__()
+        self.force_stem = force_stem
+        self.embed_dim = embed_dim
+        self.use_pos_embed = pos_embed_fn is not None
+        self.num_cls_tokens = num_cls_tokens
+        self.kernel_size = kernel_size
+        self.pos_embed = nn.Parameter(
+            torch.empty(1, (img_size[1] // kernel_size) + num_cls_tokens, embed_dim)
+        )
+
+        if self.num_cls_tokens > 0:
+            self.cls_token = nn.Parameter(
+                torch.zeros(1, self.num_cls_tokens, self.embed_dim)
+            )
+
+        self.init_parameters(init_param_style)
+
+    @torch.no_grad()
+    def init_parameters(self, init_param_style):
+        nn.init.normal_(self.pos_embed, std=0.01)
+
+        if init_param_style == "openclip":
+            # OpenCLIP style initialization
+            scale = self.embed_dim**-0.5
+
+            if self.num_cls_tokens > 0:
+                nn.init.normal_(self.cls_token)
+                self.cls_token *= scale
+        elif init_param_style == "vit":
+            self.cls_token.data.fill_(0)
+        else:
+            raise ValueError(f"Unknown init {init_param_style}")
+
+    def tokenize_input_and_cls_pos(self, input, stem):
+        # tokens is of shape B x L x D
+        tokens = stem.norm_layer(stem.proj(input))
+        assert tokens.ndim == 3
+        assert tokens.shape[2] == self.embed_dim
+        B = tokens.shape[0]
+        if self.num_cls_tokens > 0:
+            class_tokens = self.cls_token.expand(
+                B, -1, -1
+            )  # stole class_tokens impl from Phil Wang, thanks
+            tokens = torch.cat((class_tokens, tokens), dim=1)
+        if self.use_pos_embed:
+            tokens = tokens + self.pos_embed
+        return tokens
+
+    def forward(self, force):
+        # Patchify
+        force = force.unfold(
+            -1,
+            self.kernel_size,
+            self.kernel_size,
+        ).permute(0, 2, 1, 3)
+        force = force.reshape(force.size(0), force.size(1), -1)
+
+        force_tokens = self.tokenize_input_and_cls_pos(
+            force,
+            self.force_stem,
+        )
+
+        return_dict = {
+            "trunk": {
+                "tokens": force_tokens,
+            },
+            "head": {},
+        }
+        return return_dict

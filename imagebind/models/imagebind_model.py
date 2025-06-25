@@ -21,7 +21,8 @@ from imagebind.models.multimodal_preprocessors import (AudioPreprocessor,
                                              RGBDTPreprocessor,
                                              SpatioTemporalPosEmbeddingHelper,
                                              TextPreprocessor,
-                                             ThermalPreprocessor)
+                                             ThermalPreprocessor,
+                                             ForcePreprocessor)
 from imagebind.models.transformer import MultiheadAttention, SimpleTransformer
 
 ModalityType = SimpleNamespace(
@@ -31,6 +32,7 @@ ModalityType = SimpleNamespace(
     THERMAL="thermal",
     DEPTH="depth",
     IMU="imu",
+    FORCE="force",
 )
 
 
@@ -69,6 +71,11 @@ class ImageBindModel(nn.Module):
         imu_num_blocks=6,
         imu_num_heads=8,
         imu_drop_path=0.7,
+        force_embed_dim=512,
+        force_kernel_size=8,
+        force_num_blocks=6,
+        force_num_heads=8,
+        force_drop_path=0.7,
     ):
         super().__init__()
 
@@ -87,6 +94,7 @@ class ImageBindModel(nn.Module):
             thermal_embed_dim,
             thermal_kernel_size,
             imu_embed_dim,
+            force_embed_dim,
         )
 
         self.modality_trunks = self._create_modality_trunks(
@@ -112,6 +120,10 @@ class ImageBindModel(nn.Module):
             imu_num_blocks,
             imu_num_heads,
             imu_drop_path,
+            force_embed_dim,
+            force_num_blocks,
+            force_num_heads,
+            force_drop_path,
         )
 
         self.modality_heads = self._create_modality_heads(
@@ -122,6 +134,7 @@ class ImageBindModel(nn.Module):
             depth_embed_dim,
             thermal_embed_dim,
             imu_embed_dim,
+            force_embed_dim,
         )
 
         self.modality_postprocessors = self._create_modality_postprocessors(
@@ -144,6 +157,7 @@ class ImageBindModel(nn.Module):
         thermal_embed_dim=768,
         thermal_kernel_size=16,
         imu_embed_dim=512,
+        force_embed_dim=512,
     ):
         rgbt_stem = PatchEmbedGeneric(
             proj_stem=[
@@ -251,6 +265,26 @@ class ImageBindModel(nn.Module):
             imu_stem=imu_stem,
         )
 
+        force_stem = PatchEmbedGeneric(
+            [
+                nn.Linear(
+                    in_features=120,
+                    out_features=force_embed_dim,
+                    bias=False,
+                ),
+            ],
+            norm_layer=nn.LayerNorm(normalized_shape=force_embed_dim),
+        )
+
+        force_preprocessor = ForcePreprocessor(
+            img_size=[15, 3000],
+            num_cls_tokens=1,
+            kernel_size=8,
+            embed_dim=force_embed_dim,
+            pos_embed_fn=partial(SpatioTemporalPosEmbeddingHelper, learnable=True),
+            force_stem=force_stem,
+        )
+
         modality_preprocessors = {
             ModalityType.VISION: rgbt_preprocessor,
             ModalityType.TEXT: text_preprocessor,
@@ -258,6 +292,7 @@ class ImageBindModel(nn.Module):
             ModalityType.DEPTH: depth_preprocessor,
             ModalityType.THERMAL: thermal_preprocessor,
             ModalityType.IMU: imu_preprocessor,
+            ModalityType.FORCE: force_preprocessor,
         }
 
         return nn.ModuleDict(modality_preprocessors)
@@ -286,6 +321,10 @@ class ImageBindModel(nn.Module):
         imu_num_blocks=6,
         imu_num_heads=8,
         imu_drop_path=0.7,
+        force_embed_dim=512,
+        force_num_blocks=6,
+        force_num_heads=8,
+        force_drop_path=0.7,
     ):
         def instantiate_trunk(
             embed_dim, num_blocks, num_heads, pre_transformer_ln, add_bias_kv, drop_path
@@ -360,6 +399,14 @@ class ImageBindModel(nn.Module):
             add_bias_kv=True,
             drop_path=imu_drop_path,
         )
+        modality_trunks[ModalityType.FORCE] = instantiate_trunk(
+            force_embed_dim,
+            force_num_blocks,
+            force_num_heads,
+            pre_transformer_ln=False,
+            add_bias_kv=True,
+            drop_path=force_drop_path,
+        )
 
         return nn.ModuleDict(modality_trunks)
 
@@ -372,6 +419,7 @@ class ImageBindModel(nn.Module):
         depth_embed_dim,
         thermal_embed_dim,
         imu_embed_dim,
+        force_embed_dim,
     ):
         modality_heads = {}
 
@@ -412,6 +460,12 @@ class ImageBindModel(nn.Module):
             nn.Dropout(p=0.5),
             nn.Linear(imu_embed_dim, out_embed_dim, bias=False),
         )
+        modality_heads[ModalityType.FORCE] = nn.Sequential(
+            nn.LayerNorm(normalized_shape=force_embed_dim, eps=1e-6),
+            SelectElement(index=0),
+            nn.Dropout(p=0.5),
+            nn.Linear(force_embed_dim, out_embed_dim, bias=False),
+        )
 
         return nn.ModuleDict(modality_heads)
 
@@ -438,6 +492,10 @@ class ImageBindModel(nn.Module):
             Normalize(dim=-1),
             LearnableLogitScaling(logit_scale_init=5.0, learnable=False),
         )
+        modality_postprocessors[ModalityType.FORCE] = nn.Sequential(
+            Normalize(dim=-1),
+            LearnableLogitScaling(logit_scale_init=5.0, learnable=False),
+        )
 
         return nn.ModuleDict(modality_postprocessors)
     
@@ -447,9 +505,6 @@ class ImageBindModel(nn.Module):
         :param images: Input images tensor.
         :return: Encoded image embeddings.
         """
-        if images.ndim >= 5:
-            B, S = images.shape[:2]
-            images = images.reshape(B * S, *images.shape[2:])
         preprocessed = self.modality_preprocessors[ModalityType.VISION](vision=images)
         trunk_inputs = preprocessed["trunk"]
         head_inputs = preprocessed["head"]
@@ -473,6 +528,21 @@ class ImageBindModel(nn.Module):
             encoded_imus, **head_inputs
         )
         return self.modality_postprocessors[ModalityType.IMU](encoded_imus)
+    
+    def encode_force(self, forces):
+        """
+        Encode force data into embeddings.
+        :param forces: Input force data tensor.
+        :return: Encoded force embeddings.
+        """
+        preprocessed = self.modality_preprocessors[ModalityType.FORCE](force=forces)
+        trunk_inputs = preprocessed["trunk"]
+        head_inputs = preprocessed["head"]
+        encoded_forces = self.modality_trunks[ModalityType.FORCE](**trunk_inputs)
+        encoded_forces = self.modality_heads[ModalityType.FORCE](
+            encoded_forces, **head_inputs
+        )
+        return self.modality_postprocessors[ModalityType.FORCE](encoded_forces)
     
     def encode_text(self, texts):
         """
@@ -538,7 +608,7 @@ def imagebind_huge(pretrained=False):
     )
 
     if pretrained:
-        if not os.path.exists("model_imagebind_imu.pth"):
+        if not os.path.exists(".checkpoints/imagebind_huge.pth"):
             print(
                 "Downloading imagebind weights to .checkpoints/imagebind_huge.pth ..."
             )
@@ -549,7 +619,7 @@ def imagebind_huge(pretrained=False):
                 progress=True,
             )
 
-        model.load_state_dict(torch.load("model_imagebind_imu.pth"))
+        model.load_state_dict(torch.load(".checkpoints/imagebind_huge.pth"))
 
     return model
 
@@ -565,6 +635,7 @@ def imagebind_huge_imu(pretrained=False):
         out_embed_dim=1024,
         audio_drop_path=0.1,
         imu_drop_path=0.7,
+        force_drop_path=0.7,
     )
 
     if pretrained:
@@ -578,7 +649,6 @@ def imagebind_huge_imu(pretrained=False):
                 progress=True,
             )
 
-        # プリトレーニング済みの重みを全てロード
         pretrained_sd = torch.load(ckpt_path)
         # print(f"Loaded state dict keys: {list(pretrained_sd.keys())}")
 
