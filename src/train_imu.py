@@ -1,41 +1,49 @@
-import os
 import glob
+import os
 import random
 
-import torch
-import wandb
-from torch.utils.data import Dataset, DataLoader
 import cv2
-import pandas as pd
-import torchvision.transforms as T
-from PIL import Image
 import fire
 import numpy as np
+import pandas as pd
+import torch
+import torchvision.transforms as T
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 
+import wandb
 from imagebind.models.imagebind_model import imagebind_huge_imu
 
 # ---------------- 前処理（動画用） ----------------
-IMG_TRANSFORM = T.Compose([
-    T.Resize(224),
-    T.CenterCrop(224),
-    T.ToTensor(),
-    T.Normalize(mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]),
-])
+IMG_TRANSFORM = T.Compose(
+    [
+        T.Resize(224),
+        T.CenterCrop(224),
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ]
+)
 
 USE_IMU_COLS = [
-    "gyro_x", "gyro_y", "gyro_z",
-    "accl_x", "accl_y", "accl_z",
+    "gyro_x",
+    "gyro_y",
+    "gyro_z",
+    "accl_x",
+    "accl_y",
+    "accl_z",
 ]
 
+
 class IMUDataset(Dataset):
-    def __init__(self,
-                 device,
-                 data_dir: str,
-                 txt: str = "data/train.txt",
-                 imu_len: int = 2000,
-                 frame_sampling: str = "center",
-                 transform=IMG_TRANSFORM):
+    def __init__(
+        self,
+        device,
+        data_dir: str,
+        txt: str = "data/train.txt",
+        imu_len: int = 2000,
+        frame_sampling: str = "center",
+        transform=IMG_TRANSFORM,
+    ):
         """
         data_dir/imu   : {uid}_{chunk}.csv
         data_dir/video_feature : {uid}_{chunk}.pt
@@ -46,7 +54,7 @@ class IMUDataset(Dataset):
         self.frame_sampling = frame_sampling.lower()
         self.transform = transform
 
-        imu_dir   = os.path.join(data_dir, "imu")
+        imu_dir = os.path.join(data_dir, "imu")
         video_dir = os.path.join(data_dir, "video_feature")
         with open(txt, "r") as f:
             uidchunks = [line.strip() for line in f if line.strip()]
@@ -72,8 +80,8 @@ class IMUDataset(Dataset):
         # ---------------- IMU: 必要 6 列だけ読む ----------------
         imu_df = pd.read_csv(csv_path)
         # gyro_x, gyro_y, gyro_z, accl_x, accl_y, accl_z の 6 列だけ抽出
-        imu_cols = ['gyro_x', 'gyro_y', 'gyro_z', 'accl_x', 'accl_y', 'accl_z']
-        imu_array = imu_df[imu_cols].values.astype('float32')
+        imu_cols = ["gyro_x", "gyro_y", "gyro_z", "accl_x", "accl_y", "accl_z"]
+        imu_array = imu_df[imu_cols].values.astype("float32")
         for col in range(len(imu_cols)):
             # NaN を 0 に置き換え
             y = imu_array[:, col]
@@ -81,20 +89,21 @@ class IMUDataset(Dataset):
             not_nan = ~np.isnan(y)
             y_interp = np.interp(x, x[not_nan], y[not_nan])
             imu_array[:, col] = y_interp
-        imu_tensor = torch.from_numpy(imu_array).T        # → (6, T)
+        imu_tensor = torch.from_numpy(imu_array).T  # → (6, T)
 
         imu_tensor = imu_tensor.to(self.device)  # デバイスに転送
         # ---------------- VIDEO: 全フレーム取得 ----------------
         video_tensor = torch.load(pt_path).to(self.device)
         video_tensor = video_tensor.mean(dim=0)  # 平均化して [T, 1024] → [1024]
-        return video_tensor, imu_tensor         # vision_tensor, imu_tensor
+        return video_tensor, imu_tensor  # vision_tensor, imu_tensor
+
 
 def main(
     epochs: int = 8,
-    warmup_epochs: int = 2, #TODO
+    warmup_epochs: int = 2,  # TODO
     batch_size: int = 512,
     gradient_clipping: float = 1.0,
-    data_dir: str = "/large/ego4d/preprocessed/", #TODO
+    data_dir: str = "/large/ego4d/preprocessed/",  # TODO
     temperature: float = 0.2,
     weight_decay: float = 0.5,
     peak_lr: float = 5e-4,
@@ -123,9 +132,13 @@ def main(
         else:
             param.requires_grad = False
 
-    train_dataset = IMUDataset(data_dir=data_dir, device=device, imu_len=2000, frame_sampling="center")
+    train_dataset = IMUDataset(
+        data_dir=data_dir, device=device, imu_len=2000, frame_sampling="center"
+    )
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True)
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True
+    )
     optimizer = torch.optim.Adam(model.parameters(), lr=peak_lr, weight_decay=weight_decay)
     criterion = torch.nn.CrossEntropyLoss()
     for epoch in range(epochs):
@@ -173,5 +186,6 @@ def main(
     torch.save(model.state_dict(), f"model_{project_name}.pth")
     print(f"Training complete. Model saved as model_{project_name}.pth")
 
-if __name__ == "__main__": 
+
+if __name__ == "__main__":
     fire.Fire(main)  # Allows command line arguments to override defaults

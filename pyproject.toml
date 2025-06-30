@@ -28,6 +28,7 @@ dependencies = [
     "torchaudio>=0.13.1",
     "torchvision>=0.14.1",
     "types-regex>=2024.11.6.20250403",
+    "umap-learn>=0.5.7",
     "wandb>=0.19.11",
 ]
 
@@ -38,3 +39,54 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.uv.sources]
 pytorchvideo = { git = "https://github.com/facebookresearch/pytorchvideo.git", rev = "28fe037d212663c6a24f373b94cc5d478c8c1a1d" }
+
+[tool.setuptools.packages.find]
+include = ["clip*"]
+
+[dependency-groups]
+dev = [
+    "coverage>=7.6.10",
+    "mypy>=1.14.1",
+    "pre-commit>=4.1.0",
+    "pytest>=8.3.4",
+    "ruff>=0.9.1",
+]
+
+[tool.mypy]
+ignore_missing_imports = true
+exclude = "build"
+plugins = "pydantic.mypy"
+follow_imports = "silent"
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+
+[tool.ruff]
+line-length = 99
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "S101",  # flake8-bandit
+    "RUF100", # Ruff-specific rules
+]
+ignore = [
+    "B028",  # No explicit `stacklevel` keyword argument found
+    "E731",  # Do not assign a `lambda` expression, use a `def`
+    "E741",  # Ambiguous variable name (for lambda expression)
+    "E501",  # Line too long
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+    "W191",  # indentation contains tabs
+    "B904", # raise ... from ... になっていない場合のエラーを無視
+]
+unfixable = [
+    "F401",   # unused import
+    "F841",   # unused variable
+    "ERA001", # commented out code
+]

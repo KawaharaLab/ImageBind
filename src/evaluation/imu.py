@@ -1,11 +1,13 @@
-import torch
-import pandas as pd
 from pathlib import Path
-import torch.nn.functional as F
-import numpy as np
 
-from imagebind.models.imagebind_model import imagebind_huge
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn.functional as F
+
 from imagebind import data
+from imagebind.models.imagebind_model import imagebind_huge
+
 
 def main():
     # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -31,7 +33,7 @@ def main():
     correct_pairs = {}
     correct_pairs_df = pd.read_csv("data/uid_scenario_imu.csv")
     for _, row in correct_pairs_df.iterrows():
-        correct_pairs[row['video_uid']] = row['scenario']
+        correct_pairs[row["video_uid"]] = row["scenario"]
 
     n_correct = 0
     total = 0
@@ -41,8 +43,8 @@ def main():
         correct = "False"
         imu_df = pd.read_csv(imu_file)
         # gyro_x, gyro_y, gyro_z, accl_x, accl_y, accl_z の 6 列だけ抽出
-        imu_cols = ['gyro_x', 'gyro_y', 'gyro_z', 'accl_x', 'accl_y', 'accl_z']
-        imu_array = imu_df[imu_cols].values.astype('float32')
+        imu_cols = ["gyro_x", "gyro_y", "gyro_z", "accl_x", "accl_y", "accl_z"]
+        imu_array = imu_df[imu_cols].values.astype("float32")
         for col in range(len(imu_cols)):
             y = imu_array[:, col]
             x = np.arange(len(y))
@@ -50,8 +52,8 @@ def main():
             y_interp = np.interp(x, x[not_nan], y[not_nan])
             imu_array[:, col] = y_interp
         # モデルの期待形状に合わせて必要なら転置 (ここではチャネル×時系列長)
-        imu_tensor = torch.from_numpy(imu_array).T       # → (6, T)
-        imu_tensor = imu_tensor.unsqueeze(0)              # → (1, 6, T)
+        imu_tensor = torch.from_numpy(imu_array).T  # → (6, T)
+        imu_tensor = imu_tensor.unsqueeze(0)  # → (1, 6, T)
         # imu_tensor = F.interpolate(
         #     imu_tensor, scale_factor=2, mode='linear', align_corners=False
         # )                                                 # → (1, 6, 2*T)
@@ -70,14 +72,17 @@ def main():
 
         print(f"{fname}: predict={most_similar_label}, true={correct_pairs[uid]}")
         with open("data/predictions_new.txt", "a") as f:
-            f.write(f"{fname}: {correct} predict={most_similar_label}, true={correct_pairs[uid]}\n")
+            f.write(
+                f"{fname}: {correct} predict={most_similar_label}, true={correct_pairs[uid]}\n"
+            )
 
         total += 1
         print(f"Total: {total}, Correct: {n_correct}")
 
-    print(f"Accuracy: {n_correct/total*100:.2f}%")
+    print(f"Accuracy: {n_correct / total * 100:.2f}%")
     with open("data/predictions_new.txt", "a") as f:
-        f.write(f"Accuracy: {n_correct/total*100:.2f}%\n")
+        f.write(f"Accuracy: {n_correct / total * 100:.2f}%\n")
+
 
 if __name__ == "__main__":
     main()

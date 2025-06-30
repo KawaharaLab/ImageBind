@@ -28,14 +28,9 @@ def get_sinusoid_encoding_table(n_position, d_hid):
 
     # TODO: make it with torch instead of numpy
     def get_position_angle_vec(position):
-        return [
-            position / np.power(10000, 2 * (hid_j // 2) / d_hid)
-            for hid_j in range(d_hid)
-        ]
+        return [position / np.power(10000, 2 * (hid_j // 2) / d_hid) for hid_j in range(d_hid)]
 
-    sinusoid_table = np.array(
-        [get_position_angle_vec(pos_i) for pos_i in range(n_position)]
-    )
+    sinusoid_table = np.array([get_position_angle_vec(pos_i) for pos_i in range(n_position)])
     sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
     sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
 
@@ -50,9 +45,7 @@ def interpolate_pos_encoding_2d(target_spatial_size, pos_embed):
     # nn.functional.interpolate doesn't work with bfloat16 so we cast to float32
     pos_embed, updated = cast_if_src_dtype(pos_embed, torch.bfloat16, torch.float32)
     pos_embed = nn.functional.interpolate(
-        pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(
-            0, 3, 1, 2
-        ),
+        pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
         scale_factor=math.sqrt(target_spatial_size / N),
         mode="bicubic",
     )
@@ -74,9 +67,9 @@ def interpolate_pos_encoding(
     if npatch_per_img == N:
         return pos_embed
 
-    assert (
-        patches_layout[-1] == patches_layout[-2]
-    ), "Interpolation of pos embed not supported for non-square layouts"
+    assert patches_layout[-1] == patches_layout[-2], (
+        "Interpolation of pos embed not supported for non-square layouts"
+    )
 
     class_emb = pos_embed[:, :first_patch_idx]
     pos_embed = pos_embed[:, first_patch_idx:]
@@ -92,9 +85,7 @@ def interpolate_pos_encoding(
         num_spatial_tokens = patches_layout[1] * patches_layout[2]
         pos_embed = pos_embed.view(1, num_frames, num_spatial_tokens, -1)
         # interpolate embedding for zeroth frame
-        pos_embed = interpolate_pos_encoding_2d(
-            npatch_per_img, pos_embed[0, 0, ...].unsqueeze(0)
-        )
+        pos_embed = interpolate_pos_encoding_2d(npatch_per_img, pos_embed[0, 0, ...].unsqueeze(0))
     else:
         raise ValueError("This type of interpolation isn't implemented")
 
@@ -224,9 +215,7 @@ class RGBDTPreprocessor(VerboseNNModule):
                 embed_dim=self.embed_dim,
             )
         if self.num_cls_tokens > 0:
-            self.cls_token = nn.Parameter(
-                torch.zeros(1, self.num_cls_tokens, self.embed_dim)
-            )
+            self.cls_token = nn.Parameter(torch.zeros(1, self.num_cls_tokens, self.embed_dim))
         if self.use_type_embed:
             self.type_embed = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
 
@@ -275,14 +264,10 @@ class RGBDTPreprocessor(VerboseNNModule):
             raise NotImplementedError()
 
         if vision is not None:
-            vision_tokens = self.tokenize_input_and_cls_pos(
-                vision, self.rgbt_stem, patch_mask
-            )
+            vision_tokens = self.tokenize_input_and_cls_pos(vision, self.rgbt_stem, patch_mask)
 
         if depth is not None:
-            depth_tokens = self.tokenize_input_and_cls_pos(
-                depth, self.depth_stem, patch_mask
-            )
+            depth_tokens = self.tokenize_input_and_cls_pos(depth, self.depth_stem, patch_mask)
 
         # aggregate tokens
         if vision is not None and depth is not None:
@@ -352,9 +337,7 @@ class TextPreprocessor(VerboseNNModule):
         self.embed_dim = embed_dim
         if num_cls_tokens > 0:
             assert self.causal_masking is False, "Masking + CLS token isn't implemented"
-            self.cls_token = nn.Parameter(
-                torch.zeros(1, self.num_cls_tokens, embed_dim)
-            )
+            self.cls_token = nn.Parameter(torch.zeros(1, self.num_cls_tokens, embed_dim))
 
         self.init_parameters(init_param_style)
 
@@ -568,9 +551,7 @@ class SimpleTokenizer(object):
         text = whitespace_clean(basic_clean(text)).lower()
         for token in re.findall(self.pat, text):
             token = "".join(self.byte_encoder[b] for b in token.encode("utf-8"))
-            bpe_tokens.extend(
-                self.encoder[bpe_token] for bpe_token in self.bpe(token).split(" ")
-            )
+            bpe_tokens.extend(self.encoder[bpe_token] for bpe_token in self.bpe(token).split(" "))
         return bpe_tokens
 
     def decode(self, tokens):
@@ -625,9 +606,7 @@ class IMUPreprocessor(VerboseNNModule):
         )
 
         if self.num_cls_tokens > 0:
-            self.cls_token = nn.Parameter(
-                torch.zeros(1, self.num_cls_tokens, self.embed_dim)
-            )
+            self.cls_token = nn.Parameter(torch.zeros(1, self.num_cls_tokens, self.embed_dim))
 
         self.init_parameters(init_param_style)
 
@@ -684,6 +663,7 @@ class IMUPreprocessor(VerboseNNModule):
         }
         return return_dict
 
+
 class ForcePreprocessor(VerboseNNModule):
     def __init__(
         self,
@@ -706,9 +686,7 @@ class ForcePreprocessor(VerboseNNModule):
         )
 
         if self.num_cls_tokens > 0:
-            self.cls_token = nn.Parameter(
-                torch.zeros(1, self.num_cls_tokens, self.embed_dim)
-            )
+            self.cls_token = nn.Parameter(torch.zeros(1, self.num_cls_tokens, self.embed_dim))
 
         self.init_parameters(init_param_style)
 

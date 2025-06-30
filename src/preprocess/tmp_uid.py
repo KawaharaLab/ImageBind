@@ -1,10 +1,10 @@
 exclude_uids = {
-        "ea27cc27-037f-4c63-b418-faea630faf8e",
-        "2e96ebef-240a-4c8f-8d75-405d2d671021",
-        "4a08e95b-cb52-4621-b679-87f617893e19",
-        "3d67bdde-232a-442e-a29d-56f8d1a323bf",
-        "a3beb693-7e2a-4d6f-8658-88d92b453d57"
-        }
+    "ea27cc27-037f-4c63-b418-faea630faf8e",
+    "2e96ebef-240a-4c8f-8d75-405d2d671021",
+    "4a08e95b-cb52-4621-b679-87f617893e19",
+    "3d67bdde-232a-442e-a29d-56f8d1a323bf",
+    "a3beb693-7e2a-4d6f-8658-88d92b453d57",
+}
 
 input_file = "data/uids.txt"
 output_file = "data/uids.txt"

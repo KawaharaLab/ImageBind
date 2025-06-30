@@ -1,21 +1,16 @@
-import glob
 import math
 import os
-import random
 
-import cv2
 import fire
 import numpy as np
 import pandas as pd
 import torch
-import torchvision.transforms as T
-from PIL import Image
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader, Dataset
 
+import clip
 import wandb
-from imagebind.data import load_and_transform_text
-from imagebind.models.imagebind_model import imagebind_huge_imu
+from imagebind.models.imagebind_model import load_force_encoder
 
 USE_FORCE_COLS = [
     "left_fx",
@@ -81,6 +76,7 @@ class ForceDataset(Dataset):
             csv_path = row["csv_path"]
             start_id = row["timestep_start"]
             annotation = row["analysis_result"]
+
             self.pairs.append((csv_path, start_id, annotation))
 
         if not self.pairs:
@@ -99,21 +95,22 @@ class ForceDataset(Dataset):
         force_array = force_df[force_cols].values.astype("float32")[
             start_id : start_id + self.force_len, :
         ]
-        for col in range(len(force_cols)):
-            # NaN を 0 に置き換え
-            y = force_array[:, col]
-            x = np.arange(len(y))
-            not_nan = ~np.isnan(y)
-            y_interp = np.interp(x, x[not_nan], y[not_nan])
-            force_array[:, col] = y_interp
+        # for col in range(len(force_cols)):
+        #     # NaN を 0 に置き換え
+        #     y = force_array[:, col]
+        #     x = np.arange(len(y))
+        #     not_nan = ~np.isnan(y)
+        #     y_interp = np.interp(x, x[not_nan], y[not_nan])
+        #     force_array[:, col] = y_interp
         force_tensor = torch.from_numpy(force_array).T  # → (15, T)
-        force_tensor = force_tensor.to(self.device)  # デバイスに転送
+        force_tensor = force_tensor.to(self.device, dtype=torch.float32)  # デバイスに転送
+        annotation = clip.tokenize(annotation)[0].to(self.device)  # CLIP用のトークナイズ
 
         return force_tensor, annotation
 
 
 def main(
-    epochs: int = 32,
+    epochs: int = 16,
     warmup_epochs: int = 2,  # TODO
     batch_size: int = 64,
     gradient_clipping: float = 1.0,
@@ -122,56 +119,51 @@ def main(
     weight_decay: float = 0.5,
     peak_lr: float = 5e-4,  # TODO
 ):
-    model = imagebind_huge_imu(pretrained=True)
+
     project_name = "imagebind_force"
+    model_name = "force_encoder_al_ru"
     wandb.login(key="c85b817c62f441243d232b381088358e72fa2b19")
     wandb.init(
         project=project_name,
         config={
-            "model": "imagebind_huge",
+            "model": model_name,
             "batch_size": batch_size,
             "epochs": epochs,
         },
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    force_encoder = load_force_encoder().to(device).float()
+    CLIP_encoder, _ = clip.load("ViT-L/14@336px", device=device)
     # device = torch.device("cpu")
     print(f"Using device: {device}")
-    model.to(device).float()
     exp_temp = torch.tensor(temperature, dtype=torch.float32).exp().to(device)
-
-    for name, param in model.named_parameters():
-        if "force" in name:
-            # print(f"Training parameter: {name}")
-            param.requires_grad = True
-        else:
-            param.requires_grad = False
 
     train_dataset = ForceDataset(data_dir=data_dir, device=device, force_len=3000)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True
     )
-    optimizer = torch.optim.Adam(model.parameters(), lr=peak_lr, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(force_encoder.parameters(), lr=peak_lr, weight_decay=weight_decay)
 
     scheduler = CustomLRScheduler(peak_lr, warmup_epochs, epochs, optimizer)
 
     criterion = torch.nn.CrossEntropyLoss()
     for epoch in range(epochs):
-        model.train()
+        force_encoder.train()
         scheduler.step()
         train_loss = 0
         for i, (forces, annotations) in enumerate(train_loader):
             print(f"Epoch [{epoch + 1}/{epochs}], Step [{i + 1}/{len(train_loader)}]")
             optimizer.zero_grad()
-            forces = forces.to(device, dtype=torch.float32)
-            annotations = load_and_transform_text(annotations, device)
-            annotations = annotations.to(device)
+            # forces = forces.to(device, dtype=torch.float32)
+            # annotations = annotations.to(device)
             print(f"forces shape: {forces.shape}")
             print(f"annotations shape: {annotations.shape}")
-            Force_f = model.encode_force(forces)
-            Text_f = model.encode_text(annotations)
-            print(f"Force_f shape: {Force_f.shape} dtype: {Force_f.dtype}")
-            print(f"Text_f shape: {Text_f.shape} dtype: {Text_f.dtype}")
+            Force_f = force_encoder(forces)
+            with torch.no_grad():
+                Text_f = CLIP_encoder.encode_text(annotations).float()
+            print(f"Force_f shape: {Force_f.shape}")
+            print(f"Text_f shape: {Text_f.shape}")
             Force_e = Force_f / Force_f.norm(dim=-1, keepdim=True)
             Text_e = Text_f / Text_f.norm(dim=-1, keepdim=True)
             logits = (Force_e @ Text_e.T) * exp_temp
@@ -184,7 +176,7 @@ def main(
                 return
             loss.backward()
             if gradient_clipping > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clipping)
+                torch.nn.utils.clip_grad_norm_(force_encoder.parameters(), gradient_clipping)
             optimizer.step()
             train_loss += loss.item()
             wandb.log(
@@ -198,8 +190,8 @@ def main(
                 print(
                     f"Epoch [{epoch + 1}/{epochs}], Step [{i + 1}/{len(train_loader)}], Loss: {loss.item():.4f}"
                 )
-    torch.save(model.state_dict(), f"model_{project_name}.pth")
-    print(f"Training complete. Model saved as model_{project_name}.pth")
+    torch.save(force_encoder.state_dict(), f"model_{model_name}.pth")
+    print(f"Training complete. Model saved as model_{model_name}.pth")
 
 
 if __name__ == "__main__":

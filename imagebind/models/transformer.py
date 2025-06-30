@@ -117,9 +117,9 @@ class BlockWithMasking(nn.Module):
     ):
         super().__init__()
 
-        assert not isinstance(
-            attn_target, nn.Module
-        ), "attn_target should be a Callable. Otherwise attn_target is shared across blocks!"
+        assert not isinstance(attn_target, nn.Module), (
+            "attn_target should be a Callable. Otherwise attn_target is shared across blocks!"
+        )
         self.attn = attn_target()
         if drop_path > 0.0:
             self.drop_path = DropPath(drop_path)
@@ -161,11 +161,7 @@ class BlockWithMasking(nn.Module):
             x = x + self.drop_path(self.attn(self.norm_1(x), attn_mask))
             x = x + self.drop_path(self.mlp(self.norm_2(x)))
         else:
-            x = (
-                x
-                + self.drop_path(self.attn(self.norm_1(x), attn_mask))
-                * self.layer_scale_gamma1
-            )
+            x = x + self.drop_path(self.attn(self.norm_1(x), attn_mask)) * self.layer_scale_gamma1
             x = x + self.drop_path(self.mlp(self.norm_2(x))) * self.layer_scale_gamma2
         return x
 
@@ -187,7 +183,9 @@ class SimpleTransformer(nn.Module):
         norm_layer: Callable = _LAYER_NORM,
         mlp_ratio: int = 4,
         ffn_dropout_rate: float = 0.0,
-        layer_scale_type: Optional[str] = None,  # from cait; possible values are None, "per_channel", "scalar"
+        layer_scale_type: Optional[
+            str
+        ] = None,  # from cait; possible values are None, "per_channel", "scalar"
         layer_scale_init_value: float = 1e-4,  # from cait; float
         weight_init_style: str = "jax",  # possible values jax or pytorch
     ):
@@ -262,17 +260,13 @@ class SimpleTransformer(nn.Module):
             tokens = self.pre_transformer_layer(tokens)
         if use_checkpoint and checkpoint_blk_ids is None:
             checkpoint_blk_ids = [
-                blk_id
-                for blk_id in range(len(self.blocks))
-                if blk_id % checkpoint_every_n == 0
+                blk_id for blk_id in range(len(self.blocks)) if blk_id % checkpoint_every_n == 0
             ]
         if checkpoint_blk_ids:
             checkpoint_blk_ids = set(checkpoint_blk_ids)
         for blk_id, blk in enumerate(self.blocks):
             if use_checkpoint and blk_id in checkpoint_blk_ids:
-                tokens = checkpoint.checkpoint(
-                    blk, tokens, attn_mask, use_reentrant=False
-                )
+                tokens = checkpoint.checkpoint(blk, tokens, attn_mask, use_reentrant=False)
             else:
                 tokens = blk(tokens, attn_mask=attn_mask)
         if self.post_transformer_layer:

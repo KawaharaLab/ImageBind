@@ -1,5 +1,6 @@
 import random
 from pathlib import Path
+
 import torch
 
 video_feature_path = "/large/ego4d/preprocessed/video_feature"

@@ -13,16 +13,24 @@ from types import SimpleNamespace
 import torch
 import torch.nn as nn
 
-from imagebind.models.helpers import (EinOpsRearrange, LearnableLogitScaling, Normalize,
-                            SelectElement, SelectEOSAndProject)
-from imagebind.models.multimodal_preprocessors import (AudioPreprocessor,
-                                             IMUPreprocessor, PadIm2Video,
-                                             PatchEmbedGeneric,
-                                             RGBDTPreprocessor,
-                                             SpatioTemporalPosEmbeddingHelper,
-                                             TextPreprocessor,
-                                             ThermalPreprocessor,
-                                             ForcePreprocessor)
+from imagebind.models.helpers import (
+    EinOpsRearrange,
+    LearnableLogitScaling,
+    Normalize,
+    SelectElement,
+    SelectEOSAndProject,
+)
+from imagebind.models.multimodal_preprocessors import (
+    AudioPreprocessor,
+    ForcePreprocessor,
+    IMUPreprocessor,
+    PadIm2Video,
+    PatchEmbedGeneric,
+    RGBDTPreprocessor,
+    SpatioTemporalPosEmbeddingHelper,
+    TextPreprocessor,
+    ThermalPreprocessor,
+)
 from imagebind.models.transformer import MultiheadAttention, SimpleTransformer
 
 ModalityType = SimpleNamespace(
@@ -137,9 +145,7 @@ class ImageBindModel(nn.Module):
             force_embed_dim,
         )
 
-        self.modality_postprocessors = self._create_modality_postprocessors(
-            out_embed_dim
-        )
+        self.modality_postprocessors = self._create_modality_postprocessors(out_embed_dim)
 
     def _create_modality_preprocessors(
         self,
@@ -342,9 +348,7 @@ class ImageBindModel(nn.Module):
                     add_bias_kv=add_bias_kv,
                 ),
                 pre_transformer_layer=nn.Sequential(
-                    nn.LayerNorm(embed_dim, eps=1e-6)
-                    if pre_transformer_ln
-                    else nn.Identity(),
+                    nn.LayerNorm(embed_dim, eps=1e-6) if pre_transformer_ln else nn.Identity(),
                     EinOpsRearrange("b l d -> l b d"),
                 ),
                 post_transformer_layer=EinOpsRearrange("l b d -> b l d"),
@@ -498,7 +502,7 @@ class ImageBindModel(nn.Module):
         )
 
         return nn.ModuleDict(modality_postprocessors)
-    
+
     def encode_image(self, images):
         """
         Encode images into embeddings.
@@ -509,11 +513,9 @@ class ImageBindModel(nn.Module):
         trunk_inputs = preprocessed["trunk"]
         head_inputs = preprocessed["head"]
         encoded_images = self.modality_trunks[ModalityType.VISION](**trunk_inputs)
-        encoded_images = self.modality_heads[ModalityType.VISION](
-            encoded_images, **head_inputs
-        )
+        encoded_images = self.modality_heads[ModalityType.VISION](encoded_images, **head_inputs)
         return self.modality_postprocessors[ModalityType.VISION](encoded_images)
-        
+
     def encode_imu(self, imus):
         """
         Encode IMU data into embeddings.
@@ -524,11 +526,9 @@ class ImageBindModel(nn.Module):
         trunk_inputs = preprocessed["trunk"]
         head_inputs = preprocessed["head"]
         encoded_imus = self.modality_trunks[ModalityType.IMU](**trunk_inputs)
-        encoded_imus = self.modality_heads[ModalityType.IMU](
-            encoded_imus, **head_inputs
-        )
+        encoded_imus = self.modality_heads[ModalityType.IMU](encoded_imus, **head_inputs)
         return self.modality_postprocessors[ModalityType.IMU](encoded_imus)
-    
+
     def encode_force(self, forces):
         """
         Encode force data into embeddings.
@@ -539,11 +539,9 @@ class ImageBindModel(nn.Module):
         trunk_inputs = preprocessed["trunk"]
         head_inputs = preprocessed["head"]
         encoded_forces = self.modality_trunks[ModalityType.FORCE](**trunk_inputs)
-        encoded_forces = self.modality_heads[ModalityType.FORCE](
-            encoded_forces, **head_inputs
-        )
+        encoded_forces = self.modality_heads[ModalityType.FORCE](encoded_forces, **head_inputs)
         return self.modality_postprocessors[ModalityType.FORCE](encoded_forces)
-    
+
     def encode_text(self, texts):
         """
         Encode text into embeddings.
@@ -554,9 +552,7 @@ class ImageBindModel(nn.Module):
         trunk_inputs = preprocessed["trunk"]
         head_inputs = preprocessed["head"]
         encoded_texts = self.modality_trunks[ModalityType.TEXT](**trunk_inputs)
-        encoded_texts = self.modality_heads[ModalityType.TEXT](
-            encoded_texts, **head_inputs
-        )
+        encoded_texts = self.modality_heads[ModalityType.TEXT](encoded_texts, **head_inputs)
         return self.modality_postprocessors[ModalityType.TEXT](encoded_texts)
 
     def forward(self, inputs):
@@ -567,9 +563,7 @@ class ImageBindModel(nn.Module):
             )  # Audio and Video inputs consist of multiple clips
             if reduce_list:
                 B, S = modality_value.shape[:2]
-                modality_value = modality_value.reshape(
-                    B * S, *modality_value.shape[2:]
-                )
+                modality_value = modality_value.reshape(B * S, *modality_value.shape[2:])
 
             if modality_value is not None:
                 modality_value = self.modality_preprocessors[modality_key](
@@ -578,12 +572,8 @@ class ImageBindModel(nn.Module):
                 trunk_inputs = modality_value["trunk"]
                 head_inputs = modality_value["head"]
                 modality_value = self.modality_trunks[modality_key](**trunk_inputs)
-                modality_value = self.modality_heads[modality_key](
-                    modality_value, **head_inputs
-                )
-                modality_value = self.modality_postprocessors[modality_key](
-                    modality_value
-                )
+                modality_value = self.modality_heads[modality_key](modality_value, **head_inputs)
+                modality_value = self.modality_postprocessors[modality_key](modality_value)
 
                 if reduce_list:
                     modality_value = modality_value.reshape(B, S, -1)
@@ -594,7 +584,7 @@ class ImageBindModel(nn.Module):
         return outputs
 
 
-def imagebind_huge(pretrained=False):
+def imagebind_huge(pretrained=False, path=".checkpoints/imagebind_huge.pth"):
     model = ImageBindModel(
         vision_embed_dim=1280,
         vision_num_blocks=32,
@@ -608,10 +598,8 @@ def imagebind_huge(pretrained=False):
     )
 
     if pretrained:
-        if not os.path.exists(".checkpoints/imagebind_huge.pth"):
-            print(
-                "Downloading imagebind weights to .checkpoints/imagebind_huge.pth ..."
-            )
+        if not os.path.exists(path):
+            print("Downloading imagebind weights to .checkpoints/imagebind_huge.pth ...")
             os.makedirs(".checkpoints", exist_ok=True)
             torch.hub.download_url_to_file(
                 "https://dl.fbaipublicfiles.com/imagebind/imagebind_huge.pth",
@@ -619,7 +607,7 @@ def imagebind_huge(pretrained=False):
                 progress=True,
             )
 
-        model.load_state_dict(torch.load(".checkpoints/imagebind_huge.pth"))
+        model.load_state_dict(torch.load(path), strict=False)
 
     return model
 
@@ -659,4 +647,126 @@ def imagebind_huge_imu(pretrained=False):
         # strict=Falseにより、filtered_sdに含まれていないキー（例：imu）はそのまま初期値が保たれる
         model.load_state_dict(filtered_sd, strict=False)
 
+    return model
+
+
+def instantiate_trunk(
+    embed_dim, num_blocks, num_heads, pre_transformer_ln, add_bias_kv, drop_path
+):
+    return SimpleTransformer(
+        embed_dim=embed_dim,
+        num_blocks=num_blocks,
+        ffn_dropout_rate=0.0,
+        drop_path_rate=drop_path,
+        attn_target=partial(
+            MultiheadAttention,
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            bias=True,
+            add_bias_kv=add_bias_kv,
+        ),
+        pre_transformer_layer=nn.Sequential(
+            nn.LayerNorm(embed_dim, eps=1e-6) if pre_transformer_ln else nn.Identity(),
+            EinOpsRearrange("b l d -> l b d"),
+        ),
+        post_transformer_layer=EinOpsRearrange("l b d -> b l d"),
+    )
+
+
+class ForceEncoder(nn.Module):
+    def __init__(
+        self,
+        force_embed_dim=512,
+        force_kernel_size=8,
+        force_num_blocks=6,
+        force_num_heads=8,
+        force_drop_path=0.7,
+        out_embed_dim=768,
+    ):
+        super().__init__()
+
+        force_stem = PatchEmbedGeneric(
+            [
+                nn.Linear(
+                    in_features=120,
+                    out_features=force_embed_dim,
+                    bias=False,
+                ),
+            ],
+            norm_layer=nn.LayerNorm(normalized_shape=force_embed_dim),
+        )
+
+        self.force_preprocessor = ForcePreprocessor(
+            img_size=[15, 3000],
+            num_cls_tokens=1,
+            kernel_size=8,
+            embed_dim=force_embed_dim,
+            pos_embed_fn=partial(SpatioTemporalPosEmbeddingHelper, learnable=True),
+            force_stem=force_stem,
+        )
+
+        self.force_trunk = instantiate_trunk(
+            force_embed_dim,
+            force_num_blocks,
+            force_num_heads,
+            pre_transformer_ln=False,
+            add_bias_kv=True,
+            drop_path=force_drop_path,
+        )
+
+        self.force_head = nn.Sequential(
+            nn.LayerNorm(normalized_shape=force_embed_dim, eps=1e-6),
+            SelectElement(index=0),
+            nn.Dropout(p=0.5),
+            nn.Linear(force_embed_dim, out_embed_dim, bias=False),
+        )
+
+        self.force_postprocessor = nn.Sequential(
+            Normalize(dim=-1),
+            LearnableLogitScaling(logit_scale_init=5.0, learnable=False),
+        )
+
+    def forward(self, forces):
+        """
+        Encode force data into embeddings.
+        :param forces: Input force data tensor.
+        :return: Encoded force embeddings.
+        """
+        preprocessed = self.force_preprocessor(force=forces)
+        trunk_inputs = preprocessed["trunk"]
+        head_inputs = preprocessed["head"]
+        encoded_forces = self.force_trunk(**trunk_inputs)
+        encoded_forces = self.force_head(encoded_forces, **head_inputs)
+        return self.force_postprocessor(encoded_forces)
+
+
+def load_force_encoder(
+    force_embed_dim=512,
+    force_kernel_size=8,
+    force_num_blocks=6,
+    force_num_heads=8,
+    force_drop_path=0.7,
+    out_embed_dim=768,
+    pretrained=False,
+    ckpt_path=".checkpoints/force_encoder.pth",
+) -> ForceEncoder:
+    model = ForceEncoder(
+        force_embed_dim=force_embed_dim,
+        force_kernel_size=force_kernel_size,
+        force_num_blocks=force_num_blocks,
+        force_num_heads=force_num_heads,
+        force_drop_path=force_drop_path,
+        out_embed_dim=out_embed_dim,
+    )
+    if pretrained:
+        if not os.path.exists(ckpt_path):
+            print("Downloading force encoder weights to {} ...".format(ckpt_path))
+            os.makedirs(".checkpoints", exist_ok=True)
+            torch.hub.download_url_to_file(
+                "https://example.com/path/to/force_encoder.pth",
+                ckpt_path,
+                progress=True,
+            )
+
+        model.load_state_dict(torch.load(ckpt_path), strict=False)
     return model

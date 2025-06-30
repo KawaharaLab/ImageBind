@@ -7,8 +7,8 @@
 
 import logging
 import math
-import pkg_resources
 
+import pkg_resources
 import torch
 import torch.nn as nn
 import torchaudio
@@ -25,9 +25,7 @@ DEFAULT_AUDIO_FRAME_SHIFT_MS = 10  # in milliseconds
 
 
 def return_bpe_path():
-    return pkg_resources.resource_filename(
-        "imagebind", "bpe/bpe_simple_vocab_16e6.txt.gz"
-    )
+    return pkg_resources.resource_filename("imagebind", "bpe/bpe_simple_vocab_16e6.txt.gz")
 
 
 def waveform2melspec(waveform, sample_rate, num_mel_bins, target_length):
@@ -138,19 +136,13 @@ def load_and_transform_audio_data(
     for audio_path in audio_paths:
         waveform, sr = torchaudio.load(audio_path)
         if sample_rate != sr:
-            waveform = torchaudio.functional.resample(
-                waveform, orig_freq=sr, new_freq=sample_rate
-            )
-        all_clips_timepoints = get_clip_timepoints(
-            clip_sampler, waveform.size(1) / sample_rate
-        )
+            waveform = torchaudio.functional.resample(waveform, orig_freq=sr, new_freq=sample_rate)
+        all_clips_timepoints = get_clip_timepoints(clip_sampler, waveform.size(1) / sample_rate)
         all_clips = []
         for clip_timepoints in all_clips_timepoints:
             waveform_clip = waveform[
                 :,
-                int(clip_timepoints[0] * sample_rate) : int(
-                    clip_timepoints[1] * sample_rate
-                ),
+                int(clip_timepoints[0] * sample_rate) : int(clip_timepoints[1] * sample_rate),
             ]
             waveform_melspec = waveform2melspec(
                 waveform_clip, sample_rate, num_mel_bins, target_length
