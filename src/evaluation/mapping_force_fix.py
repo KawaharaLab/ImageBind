@@ -5,10 +5,10 @@ import numpy as np
 import pandas as pd
 import torch
 
-matplotlib.use("Agg")           # GUI なしでも動かす
+matplotlib.use("Agg")  # GUI なしでも動かす
 import matplotlib.pyplot as plt
 import umap
-
+from fire import Fire
 import clip
 from imagebind.models.force_model import load_force_encoder
 
@@ -32,9 +32,13 @@ USE_FORCE_COLS = [
     "dof_8",
 ]
 
-def main():
+
+def plotting(name, length="short", type="normal"):
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    force_encoder = load_force_encoder(pretrained=True, ckpt_path="/home/mdxuser/ImageBind/0630_force_encoder_al_ru.pth")
+    force_encoder = load_force_encoder(
+        pretrained=True, ckpt_path=f"/home/mdxuser/ImageBind/data/al_ru/{name}_epoch_811.pth"
+    )
     force_encoder.eval().to(device)
     text_encoder, _ = clip.load("ViT-L/14@336px", device=device)
 
@@ -71,22 +75,32 @@ def main():
             emb = force_encoder(force_tensor)  # → (1, D)
             emb = emb / emb.norm(dim=-1, keepdim=True)
         force_feats.append(emb.cpu().numpy().reshape(-1))
-        label_preprocessed = clip.tokenize([row["label"]]).to(device)
+        if length == "long":
+            label_preprocessed = clip.tokenize([row["label"]]).to(device)
+        else:
+            label_preprocessed = clip.tokenize([row["label_short"]]).to(device)
         with torch.no_grad():
             label_emb = text_encoder.encode_text(label_preprocessed)
             print(f"label_emb shape: {label_emb.shape}")  # (1, D)
             labels_feats.append(label_emb.cpu().numpy().reshape(-1))
-        labels.append(row["label"])
+        if length == "long":
+            labels.append(row["label"])  # 元のラベルを保存
+        else:
+            labels.append(row["label_short"])  # 短いラベルを保存
     force_feats = np.stack(force_feats)  # (N_samples, D)
     labels_feats = np.stack(labels_feats)  # (N_samples, D)
     # ───────────── UMAP 次元削減 ─────────────
     reducer = umap.UMAP(random_state=42)
-    embedding_force = reducer.fit_transform(force_feats)  # → (N, 2)
-    embedding_labels = reducer.transform(labels_feats)    # → (N, 2)
-    # embedding_labels_exclusive = reducer.fit_transform([labels_feats[0], labels_feats[1], labels_feats[2], labels_feats[4]])  # → (N, 2)
-    # embedding_labels = reducer.transform(labels_feats)    # → (N, 2)
-    # embedding_force = reducer.transform(force_feats)  # → (N, 2)
 
+    if type == "textbase":
+        embedding_labels_exclusive = reducer.fit_transform(
+            [labels_feats[0], labels_feats[1], labels_feats[2], labels_feats[4]]
+        )  # → (N, 2)
+        embedding_labels = reducer.transform(labels_feats)  # → (N, 2)
+        embedding_force = reducer.transform(force_feats)  # → (N, 2)
+    else:
+        embedding_force = reducer.fit_transform(force_feats)  # → (N, 2)
+        embedding_labels = reducer.transform(labels_feats)    # → (N, 2)
     # ──────────── ここを追加 ────────────
     # 各サンプルのラベルに対応する整数インデックスを作成
     unique_labels = sorted(set(labels))
@@ -117,6 +131,7 @@ def main():
 
     # ──────────── 凡例：ラベルごとの色 ────────────
     import matplotlib.patches as mpatches
+
     # unique_labels はすでに定義済み
     color_handles = [
         mpatches.Patch(color=scatter.cmap(scatter.norm(idx)), label=lbl)
@@ -133,8 +148,10 @@ def main():
 
     # ──────────── 凡例：Text Embeddings マーカー ────────────
     from matplotlib.lines import Line2D
+
     text_handle = Line2D(
-        [0], [0],
+        [0],
+        [0],
         marker="X",
         color="w",
         markerfacecolor="k",
@@ -152,11 +169,25 @@ def main():
     plt.gca().add_artist(legend2)
 
     plt.title("UMAP of Force vs Text Embeddings", fontsize=16)
-    os.makedirs("data", exist_ok=True)
-    out_path = os.path.join("data", "1_force_umap_long.png")
+    os.makedirs(f"data/{name}", exist_ok=True)
+    if type == "textbase":
+        out_path = os.path.join(f"data/{name}", f"force_umap_{length}_textbase.png")
+    else:
+        out_path = os.path.join(f"data/{name}", f"force_umap_{length}_normal.png")
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved UMAP of force embeddings → {out_path}")
+    plt.close()  # プロットを閉じる
+
+def main(name):
+    """
+    Main function to run the plotting.
+    :param name: Name of the model or dataset to use for plotting.
+    """
+    plotting(name, length="short", type="normal")
+    plotting(name, length="long", type="normal")
+    plotting(name, length="short", type="textbase")
+    plotting(name, length="long", type="textbase")
 
 
 if __name__ == "__main__":
-    main()
+    Fire(main)

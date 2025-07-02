@@ -33,20 +33,16 @@ USE_FORCE_COLS = [
 
 def main(model_path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    force_encoder = load_force_encoder(
-        pretrained=True, ckpt_path=model_path
-    )
+    force_encoder = load_force_encoder(pretrained=True, ckpt_path=model_path)
     force_encoder.eval().to(device)
-    text_encoder, _ = clip.load(
-        "ViT-L/14@336px", device=device
-    )
+    text_encoder, _ = clip.load("ViT-L/14@336px", device=device)
 
     # 学習時と同じ logit‐scale を使う
     temperature = 0.2
     exp_temp = torch.exp(torch.tensor(temperature)).to(device)
     # label の読み込み
     labels = []
-    with open(data_dir + "scenarios_simple.txt", "r") as f:
+    with open(data_dir + "scenarios_very_simple.txt", "r") as f:
         for line in f:
             labels.append(line.strip())
     labels_preprocessed = clip.tokenize(labels).to(device)
@@ -91,7 +87,7 @@ def main(model_path):
         # (2) 最も高いスコアのラベルを予測
         pred_idx = scores.argmax().item()
         pred_label = labels[pred_idx]
-        if pred_label == row["label"]:
+        if pred_label == row["label_short"]:
             n_correct += 1
             correct = "True"
 
@@ -100,17 +96,17 @@ def main(model_path):
 
         # (3) ファイルにも全スコアを追記
         with open(data_dir + "predictions_new.txt", "a") as f:
-            line = f"{row['csv_path']},{start},{correct},{row['label']},{pred_label}"
+            line = f"{row['csv_path']},{start},{correct},{row['label_short']},{pred_label}"
             for p in probs[0]:
                 line += f",{p.item():.4f}"
             f.write(line + "\n")
 
         # 各ラベルの確率を出力
-        for idx, label in enumerate(labels):
-            print(f"  {label}: {probs[0, idx].item():.4f}")
+        # for idx, label in enumerate(labels):
+        #     print(f"  {label}: {probs[0, idx].item():.4f}")
 
         total += 1
-        print(f"Predict={pred_label}  Total={total}, Correct={n_correct}")
+        print(f"Predict={pred_label} True={row['label_short']} Total={total}, Correct={n_correct}")
 
     print(f"Accuracy: {n_correct / total * 100:.2f}%")
     with open(data_dir + "predictions_new.txt", "a") as f:

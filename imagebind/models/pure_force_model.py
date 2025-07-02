@@ -64,7 +64,7 @@ class ForceEncoder(nn.Module):
         force_stem = PatchEmbedGeneric(
             [
                 nn.Linear(
-                    in_features=120,
+                    in_features=48,
                     out_features=force_embed_dim,
                     bias=False,
                 ),
@@ -73,7 +73,7 @@ class ForceEncoder(nn.Module):
         )
 
         self.force_preprocessor = ForcePreprocessor(
-            img_size=[15, 3000],
+            img_size=[6, 3000],
             num_cls_tokens=1,
             kernel_size=force_kernel_size,
             embed_dim=force_embed_dim,

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-matplotlib.use("Agg")           # GUI なしでも動かす
+matplotlib.use("Agg")  # GUI なしでも動かす
 import matplotlib.pyplot as plt
 import umap
 
@@ -32,9 +32,12 @@ USE_FORCE_COLS = [
     "dof_8",
 ]
 
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = imagebind_huge(pretrained=True, path="/home/mdxuser/ImageBind/data/model_imagebind_force.pth")
+    model = imagebind_huge(
+        pretrained=True, path="/home/mdxuser/ImageBind/data/model_imagebind_force.pth"
+    )
     model.eval().to(device)
 
     # # label の読み込み (必要なければ削除可)
@@ -81,7 +84,7 @@ def main():
     # ───────────── UMAP 次元削減 ─────────────
     reducer = umap.UMAP(random_state=42)
     embedding_force = reducer.fit_transform(force_feats)  # → (N, 2)
-    embedding_labels = reducer.transform(labels_feats)    # → (N, 2)
+    embedding_labels = reducer.transform(labels_feats)  # → (N, 2)
     # embedding_labels_exclusive = reducer.fit_transform([labels_feats[0], labels_feats[1], labels_feats[2], labels_feats[4]])  # → (N, 2)
     # embedding_labels = reducer.transform(labels_feats)    # → (N, 2)
     # embedding_force = reducer.transform(force_feats)  # → (N, 2)
@@ -115,6 +118,7 @@ def main():
 
     # ──────────── 凡例：ラベルごとの色 ────────────
     import matplotlib.patches as mpatches
+
     # unique_labels はすでに定義済み
     color_handles = [
         mpatches.Patch(color=scatter.cmap(scatter.norm(idx)), label=lbl)
@@ -131,8 +135,10 @@ def main():
 
     # ──────────── 凡例：Text Embeddings マーカー ────────────
     from matplotlib.lines import Line2D
+
     text_handle = Line2D(
-        [0], [0],
+        [0],
+        [0],
         marker="X",
         color="w",
         markerfacecolor="k",

@@ -52,13 +52,11 @@ class CustomLRScheduler(_LRScheduler):
         super(CustomLRScheduler, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        return self.base_lrs
         if self.last_epoch < self.warmup_epochs:
             return [base_lr * (self.last_epoch + 1) / self.warmup_epochs for base_lr in self.base_lrs]  # ウォームアップ期間中は線形増加
         else:
-            # 元のコードではself.base_lrsの要素ごとに計算していたので、それに合わせます
             decay_ratio = 0.5 * (
-                1.0
+                1
                 + math.cos(
                     math.pi
                     * (self.last_epoch - self.warmup_epochs)
@@ -135,7 +133,7 @@ def main(
     data_dir: str = "/home/mdxuser/sim/Genesis/data/",
     temperature: float = 0.07,
     weight_decay: float = 0.05,
-    peak_lr: float = 2e-5,
+    peak_lr: float = 1e-4,
 ):
     project_name = "imagebind_force_simple"
     model_name = "al_ru"
@@ -149,7 +147,7 @@ def main(
         },
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    force_encoder = load_force_encoder().to(device).float()
+    force_encoder = load_force_encoder(pretrained=True, ckpt_path="/home/mdxuser/ImageBind/data/al_ru/magic-wood-9.pth").to(device).float()
     CLIP_encoder, _ = clip.load("ViT-L/14@336px", device=device)
     # device = torch.device("cpu")
     print(f"Using device: {device}")
@@ -213,7 +211,7 @@ def main(
         )
         if epoch % 10 == 0:
             torch.save(
-                force_encoder.state_dict(), f"data/{model_name}/{run_name}_epoch_{epoch + 1}.pth"
+                force_encoder.state_dict(), f"data/{model_name}/{run_name}_epoch_{epoch + 101}.pth"
             )
     torch.save(force_encoder.state_dict(), f"data/{model_name}/{run_name}.pth")
     print(f"Training complete. Model saved as {run_name}.pth")
