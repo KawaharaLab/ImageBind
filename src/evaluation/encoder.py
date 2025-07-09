@@ -10,7 +10,7 @@ from imagebind.models.imagebind_model import imagebind_huge
 
 data_dir = "/home/mdxuser/sim/Genesis/data/"
 
-USE_FORCE_COLS = [
+ALL_COLS = [
     "left_fx",
     "left_fy",
     "left_fz",
@@ -67,10 +67,10 @@ def main():
         start = row["timestep_start"]
         force_df = pd.read_csv(force_csv)
         correct = "False"
-        force_array = force_df[USE_FORCE_COLS].values.astype("float32")[
+        force_array = force_df[ALL_COLS].values.astype("float32")[
             start : start + 3000, :
         ]  # 3000 samples
-        for col in range(len(USE_FORCE_COLS)):
+        for col in range(len(ALL_COLS)):
             y = force_array[:, col]
             x = np.arange(len(y))
             not_nan = ~np.isnan(y)

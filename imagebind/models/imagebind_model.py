@@ -740,7 +740,7 @@ class ForceEncoder(nn.Module):
         return self.force_postprocessor(encoded_forces)
 
 
-def load_force_encoder(
+def load_model(
     force_embed_dim=512,
     force_kernel_size=8,
     force_num_blocks=6,

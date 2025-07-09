@@ -52,54 +52,57 @@ def instantiate_trunk(
 class ForceEncoder(nn.Module):
     def __init__(
         self,
-        force_embed_dim=512,
-        force_kernel_size=8,
-        force_num_blocks=6,
-        force_num_heads=8,
-        force_drop_path=0.7,
+        embed_dim=512,
+        kernel_size=8,
+        num_blocks=6,
+        num_heads=8,
+        drop_path=0.7,
         out_embed_dim=768,
+        data_len=3000,
+        data_channels=15,  # Number of force channels (e.g., left_fx, left_fy, etc.)
+        temperature=0.2,  # Temperature for logit scaling
     ):
         super().__init__()
-
+        in_features = data_channels * kernel_size
         force_stem = PatchEmbedGeneric(
             [
                 nn.Linear(
-                    in_features=120,
-                    out_features=force_embed_dim,
+                    in_features=in_features,
+                    out_features=embed_dim,
                     bias=False,
                 ),
             ],
-            norm_layer=nn.LayerNorm(normalized_shape=force_embed_dim),
+            norm_layer=nn.LayerNorm(normalized_shape=embed_dim),
         )
 
         self.force_preprocessor = ForcePreprocessor(
-            img_size=[15, 3000],
+            img_size=[data_channels, data_len],
             num_cls_tokens=1,
-            kernel_size=force_kernel_size,
-            embed_dim=force_embed_dim,
+            kernel_size=kernel_size,
+            embed_dim=embed_dim,
             pos_embed_fn=partial(SpatioTemporalPosEmbeddingHelper, learnable=True),
             force_stem=force_stem,
         )
 
         self.force_trunk = instantiate_trunk(
-            force_embed_dim,
-            force_num_blocks,
-            force_num_heads,
+            embed_dim,
+            num_blocks,
+            num_heads,
             pre_transformer_ln=False,
             add_bias_kv=True,
-            drop_path=force_drop_path,
+            drop_path=drop_path,
         )
 
         self.force_head = nn.Sequential(
-            nn.LayerNorm(normalized_shape=force_embed_dim, eps=1e-6),
+            nn.LayerNorm(normalized_shape=embed_dim, eps=1e-6),
             SelectElement(index=0),
             nn.Dropout(p=0.5),
-            nn.Linear(force_embed_dim, out_embed_dim, bias=False),
+            nn.Linear(embed_dim, out_embed_dim, bias=False),
         )
 
         self.force_postprocessor = nn.Sequential(
             Normalize(dim=-1),
-            LearnableLogitScaling(logit_scale_init=5.0, learnable=False),
+            LearnableLogitScaling(logit_scale_init=1.0/temperature, learnable=False),
         )
 
     def forward(self, forces):
@@ -116,33 +119,34 @@ class ForceEncoder(nn.Module):
         return self.force_postprocessor(encoded_forces)
 
 
-def load_force_encoder(
-    force_embed_dim=512,
-    force_kernel_size=8,
-    force_num_blocks=6,
-    force_num_heads=8,
-    force_drop_path=0.7,
+def load_model(
+    embed_dim=512,
+    kernel_size=8,
+    num_blocks=6,
+    num_heads=8,
+    drop_path=0.7,
     out_embed_dim=768,
     pretrained=False,
+    data_len=3000,
+    data_channels=15,
     ckpt_path=".checkpoints/force_encoder.pth",
+    temperature=0.2,  # Temperature for logit scaling
 ) -> ForceEncoder:
     model = ForceEncoder(
-        force_embed_dim=force_embed_dim,
-        force_kernel_size=force_kernel_size,
-        force_num_blocks=force_num_blocks,
-        force_num_heads=force_num_heads,
-        force_drop_path=force_drop_path,
+        embed_dim=embed_dim,
+        kernel_size=kernel_size,
+        num_blocks=num_blocks,
+        num_heads=num_heads,
+        drop_path=drop_path,
+        data_len=data_len,
         out_embed_dim=out_embed_dim,
+        data_channels=data_channels,
+        temperature=temperature,
     )
     if pretrained:
+        if ckpt_path is None:
+            raise ValueError("ckpt_path must be provided when pretrained is True")
         if not os.path.exists(ckpt_path):
-            print("Downloading force encoder weights to {} ...".format(ckpt_path))
-            os.makedirs(".checkpoints", exist_ok=True)
-            torch.hub.download_url_to_file(
-                "https://example.com/path/to/force_encoder.pth",
-                ckpt_path,
-                progress=True,
-            )
-
-        model.load_state_dict(torch.load(ckpt_path), strict=False)
+            raise FileNotFoundError(f"Checkpoint file {ckpt_path} does not exist.")
+        model.load_state_dict(torch.load(ckpt_path))
     return model
