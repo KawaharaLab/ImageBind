@@ -9,9 +9,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "cartopy>=0.24.1",
-    "decord>=0.6.0",
+
     "einops>=0.8.1",
-    "eva-decord==0.6.1",
+    
     "fire>=0.7.0",
     "ftfy>=6.3.1",
     "fvcore>=0.1.5.post20221221",

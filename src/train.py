@@ -12,6 +12,8 @@ import clip
 import wandb
 from imagebind.models.force_model import load_model
 
+BASE_PATH = '/Users/hh/Desktop/ImageBind/ImageBind'
+
 ALL_COLS = [
     "left_fx",
     "left_fy",
@@ -82,7 +84,7 @@ class ForceDataset(Dataset):
     def __init__(
         self,
         # device はここから削除します
-        data_dir: str = "/home/mdxuser/sim/Genesis/data/",
+        data_dir: str = f"{BASE_PATH}/data",
         data_len: int = 3000,
         use_cols: list = PURE_FORCE_COLS,
     ):
@@ -101,8 +103,10 @@ class ForceDataset(Dataset):
         unique_csv_paths = train_df["csv_path"].unique()
         
         # 2. 全てのCSVを一度だけ読み、辞書にキャッシュする
+        for path in unique_csv_paths:
+            print(path)
         data_cache = {
-            path: pd.read_csv("/home/mdxuser/sim/Genesis/" + path, usecols=self.use_cols).values.astype("float32")
+            path: pd.read_csv(path, usecols=self.use_cols).values.astype("float32")
             for path in unique_csv_paths
         }
         print(f"Loaded {len(data_cache)} unique CSV files into memory.")
@@ -146,7 +150,7 @@ def main(
     warmup_epochs: int = 20,
     batch_size: int = 128,
     gradient_clipping: float = 1.0,
-    data_dir: str = "/home/mdxuser/sim/Genesis/data/",
+    data_dir: str = f"{BASE_PATH}/data",
     temperature: float = 0.4,
     weight_decay = None,
     peak_lr: float = 5e-4,
@@ -167,7 +171,7 @@ def main(
         use_cols = ALL_COLS
     project_name = "imagebind_force_simple"
     model_name = mode
-    wandb.login(key="c85b817c62f441243d232b381088358e72fa2b19")
+    wandb.login(key="3f9edde5e58f6c9eab6123b18cf61030047ba716")
     wandb.init(
         project=project_name,
         config={
