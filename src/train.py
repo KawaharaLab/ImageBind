@@ -102,7 +102,7 @@ class ForceDataset(Dataset):
         
         # 2. 全てのCSVを一度だけ読み、辞書にキャッシュする
         data_cache = {
-            path: pd.read_csv("/home/mdxuser/sim/Genesis/" + path, usecols=self.use_cols).iloc[::3000//self.data_len].reset_index(drop=True).values.astype("float32")
+            path: pd.read_csv("/home/mdxuser/sim/Genesis/" + path, usecols=self.use_cols).values.astype("float32")
             for path in unique_csv_paths
         }
         print(f"Loaded {len(data_cache)} unique CSV files into memory.")
@@ -110,7 +110,7 @@ class ForceDataset(Dataset):
         # 3. 各サンプルをメモリ上のデータへの参照として保持
         for _, row in train_df.iterrows():
             csv_path = row["csv_path"]
-            start_id = row["timestep_start"]*data_len//3000  # 3000msを基準にスケーリング
+            start_id = row["timestep_start"]
             
             # メモリ上のNumPy配列から直接スライスして追加
             force_segment = data_cache[csv_path][start_id : start_id + self.data_len, :]
@@ -153,7 +153,7 @@ def main(
     drop_path: float = 0.3,
     num_blocks: int = 4,
     out_embed_dim: int = 512,
-    data_len: int = 300,
+    data_len: int = 150,
     mode: str = "normal",
 ):
     if mode == "pure":

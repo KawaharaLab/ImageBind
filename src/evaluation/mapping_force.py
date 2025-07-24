@@ -94,8 +94,8 @@ def plotting(name, length="short", type="normal"):
     labels = []
     for _, row in eval_df.iterrows():
         force_csv = row["csv_path"]
-        start = row["timestep_start"]*data_len//3000
-        force_df = pd.read_csv(force_csv).iloc[::3000//data_len].reset_index(drop=True)
+        start = row["timestep_start"]
+        force_df = pd.read_csv(force_csv)
         arr = force_df[use_cols].values.astype("float32")[start : start + data_len, :]
         # NaN 補間
         # for col in range(arr.shape[1]):
@@ -227,10 +227,10 @@ def main(name):
     Main function to run the plotting.
     :param name: Name of the model or dataset to use for plotting.
     """
-    # plotting(name, length="short", type="normal")
+    plotting(name, length="short", type="normal")
     plotting(name, length="long", type="normal")
-    # plotting(name, length="short", type="textbase")
-    # plotting(name, length="long", type="textbase")
+    plotting(name, length="short", type="textbase")
+    plotting(name, length="long", type="textbase")
 
 
 if __name__ == "__main__":

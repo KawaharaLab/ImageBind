@@ -103,8 +103,8 @@ def main(model_path):
     total = 0
     for _, row in eval_df.iterrows():
         force_csv = row["csv_path"]
-        start = row["timestep_start"]*data_len//3000
-        force_df = pd.read_csv(force_csv).iloc[::3000//data_len].reset_index(drop=True)
+        start = row["timestep_start"]
+        force_df = pd.read_csv(force_csv)
         correct = "False"
         force_array = force_df[use_cols].values.astype("float32")[start : start + data_len, :]
         # for col in range(len(ALL_COLS)):
