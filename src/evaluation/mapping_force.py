@@ -12,7 +12,7 @@ from fire import Fire
 import clip
 from imagebind.models.force_model import load_model
 
-data_dir = "/home/mdxuser/sim/Genesis/data/"
+data_dir = "/home/mdxuser/ImageBind/data"
 
 ALL_COLS = [
     "left_fx",
@@ -55,9 +55,9 @@ def plotting(name, length="short", type="normal"):
     #========================== TODO: change to json ============================
     temperature: float = 0.2
     drop_path: float = 0.3
-    num_blocks: int = 4
+    num_blocks: int = 6
     out_embed_dim: int = 512
-    data_len: int = 300
+    data_len: int = 100
     mode = "pure"
     cnn = False
     #==========================================================================
@@ -78,7 +78,7 @@ def plotting(name, length="short", type="normal"):
     else:
         from imagebind.models.force_model import load_model
         force_encoder = load_model(
-            pretrained=True, ckpt_path=f"/home/mdxuser/ImageBind/data/{mode}/{name}.pth",
+            pretrained=True, ckpt_path=f"/home/mdxuser/ImageBind/simple/contrastive_force_test/dandy-cloud-13_epoch_150.pth",
             drop_path=drop_path, num_blocks=num_blocks, out_embed_dim=out_embed_dim, data_channels=data_channels, data_len=data_len, temperature=temperature
         ).to(device).float()
 
@@ -86,7 +86,7 @@ def plotting(name, length="short", type="normal"):
     force_encoder.eval().to(device)
     text_encoder, _ = clip.load("ViT-B/16", device=device)
 
-    eval_df = pd.read_csv(data_dir + "eval.csv")
+    eval_df = pd.read_csv("/home/mdxuser/Genesis/main/data/picked_up/eval.csv")
 
     # ───────────── UMAP 用に force 埋め込みを収集 ─────────────
     force_feats = []
@@ -112,7 +112,7 @@ def plotting(name, length="short", type="normal"):
         if length == "long":
             label_preprocessed = clip.tokenize([row["label"]]).to(device)
         else:
-            label_preprocessed = clip.tokenize([row["label_short"]]).to(device)
+            label_preprocessed = clip.tokenize([row["annotation"]]).to(device)
         with torch.no_grad():
             label_emb = text_encoder.encode_text(label_preprocessed)
             print(f"label_emb shape: {label_emb.shape}")  # (1, D)
@@ -120,7 +120,7 @@ def plotting(name, length="short", type="normal"):
         if length == "long":
             labels.append(row["label"])  # 元のラベルを保存
         else:
-            labels.append(row["label_short"])  # 短いラベルを保存
+            labels.append(row["annotation"])  # 短いラベルを保存
     force_feats = np.stack(force_feats)  # (N_samples, D)
     labels_feats = np.stack(labels_feats)  # (N_samples, D)
     # ───────────── UMAP 次元削減 ─────────────
@@ -213,11 +213,11 @@ def plotting(name, length="short", type="normal"):
     plt.gca().spines['right'].set_visible(False)
     # plt.gca().spines['bottom'].set_visible(False)
     # plt.gca().spines['left'].set_visible(False)
-    os.makedirs(f"data/{name}", exist_ok=True)
+    os.makedirs(os.path.join(data_dir, name), exist_ok=True)
     if type == "textbase":
-        out_path = os.path.join(f"data/{name}", f"force_umap_{length}_textbase.png")
+        out_path = os.path.join(f"{data_dir}/{name}", f"force_umap_{length}_textbase.png")
     else:
-        out_path = os.path.join(f"data/{name}", f"force_umap_{length}_normal.png")
+        out_path = os.path.join(f"{data_dir}/{name}", f"force_umap_{length}_normal.png")
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved UMAP of force embeddings → {out_path}")
     plt.close()  # プロットを閉じる
@@ -228,9 +228,9 @@ def main(name):
     :param name: Name of the model or dataset to use for plotting.
     """
     plotting(name, length="short", type="normal")
-    plotting(name, length="long", type="normal")
+    #plotting(name, length="long", type="normal")
     plotting(name, length="short", type="textbase")
-    plotting(name, length="long", type="textbase")
+    #plotting(name, length="long", type="textbase")
 
 
 if __name__ == "__main__":
