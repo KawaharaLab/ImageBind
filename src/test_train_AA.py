@@ -12,9 +12,10 @@ from imagebind.models.force_model import load_model
 from tqdm import tqdm # Import tqdm
 
 # === CONFIGURABLE PATHS ===
-BASE_PATH = "/home/mdxuser/ImageBind/src"
-TRAIN_CSV = "/home/mdxuser/Genesis/data/formatted_training_data_IB.csv"
-MODEL_DIR = "data/contrastive_force_test"
+# BASE_PATH = "/home/mdxuser/ImageBind/src" # Base path for the project
+BASE_PATH = "/home/mdxuser/sim/Genesis"
+TRAIN_CSV = "/home/mdxuser/Genesis/main/data/picked_up/simple_formatted_training_data_IB_2_train.csv" # Path to the training CSV
+MODEL_DIR = "/home/mdxuser/ImageBind/data/ESEP_data" # Directory to save models
 
 PURE_FORCE_COLS = ["left_fx", "left_fy", "left_fz", "right_fx", "right_fy", "right_fz"]
 
@@ -65,10 +66,13 @@ class CustomLRScheduler(_LRScheduler):
 
 # === TRAIN ===
 def train():
-    wandb.login(key="3f9edde5e58f6c9eab6123b18cf61030047ba716")
-    wandb.init(project="imagebind_force_test", config={
-        "batch_size": 64,
-        "epochs": 400,
+    min_val_loss = 9999999999
+    min_val_loss_epoch = 0
+    wandb.login(key="3f9edde5e58f6c9eab6123b18cf61030047ba716") # Takuro's API key
+    #wandb.login(key="c4561343bdea6f62ce7d98f04f6f7ffc48ff8359")  # Azka's API key
+    wandb.init(project="imagebind_force_no_corrupted_data", config={
+        "batch_size": 256,
+        "epochs": 2000,
         "warmup_epochs": 20,
         "peak_lr": 1e-3,
         "drop_path": 0.35,
@@ -170,9 +174,13 @@ def train():
 
         if (epoch + 1) % 50 == 0:
             torch.save(force_encoder.state_dict(), f"{MODEL_DIR}/{run_name}_epoch_{epoch+1}.pth")
+        if val_loss < min_val_loss:
+            print(f'New min val loss = {val_loss} vs. prev {min_val_loss}. Diff = {min_val_loss - val_loss}')
+            min_val_loss = val_loss
+            min_val_loss_epoch = epoch
 
     torch.save(force_encoder.state_dict(), f"{MODEL_DIR}/{run_name}_final.pth")
-    print(f"Finished training. Model saved to {MODEL_DIR}/{run_name}_final.pth")
+    print(f"Finished training. Model saved to {MODEL_DIR}/{run_name}_final.pth. Best val_loss: {min_val_loss} at epoch {min_val_loss_epoch}")
 
 if __name__ == "__main__":
     train()

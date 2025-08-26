@@ -84,7 +84,7 @@ class ForceDataset(Dataset):
     def __init__(
         self,
         # device はここから削除します
-        data_dir: str = f"{BASE_PATH}/data",
+        data_dir: str = f"/home/mdxuser/sim/Genesis/data",
         data_len: int = 3000,
         use_cols: list = PURE_FORCE_COLS,
     ):
@@ -150,7 +150,7 @@ def main(
     warmup_epochs: int = 20,
     batch_size: int = 128,
     gradient_clipping: float = 1.0,
-    data_dir: str = f"{BASE_PATH}/data",
+    data_dir: str = f"/home/mdxuser/sim/Genesis/data",
     temperature: float = 0.4,
     weight_decay = None,
     peak_lr: float = 5e-4,
@@ -169,7 +169,7 @@ def main(
     else:
         data_channels = 15
         use_cols = ALL_COLS
-    project_name = "imagebind_force_simple"
+    project_name = "imagebind_force"
     model_name = mode
     wandb.login(key="3f9edde5e58f6c9eab6123b18cf61030047ba716")
     wandb.init(

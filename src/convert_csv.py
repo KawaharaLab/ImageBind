@@ -1,9 +1,10 @@
 import os
 import pandas as pd
 
-ANNOTATION_PATH = '/Users/hh/Desktop/genesis/genesis_forked/Genesis/main/data/picked_up_5/annotations'
-CSV_BASE_DIR = '/Users/hh/Desktop/genesis/genesis_forked/Genesis/main/data/picked_up_5/csv'
-OUTPUT_CSV = "/Users/hh/Desktop/ImageBind/ImageBind/data/train.csv"
+BASE_PATH = '/home/mdxuser/Genesis/main/data/picked_up_4'
+ANNOTATION_PATH = f'{BASE_PATH}/annotations'
+CSV_BASE_DIR = f'{BASE_PATH}/csv'
+OUTPUT_CSV = f"/home/mdxuser/ImageBind/src/train_upsampled_simple.csv"
 
 format1_rows = []
 
@@ -32,7 +33,7 @@ for filename in os.listdir(ANNOTATION_PATH):
 
             format1_rows.append({
                 "csv_path": full_csv_path,
-                "timestep_start": timestep_start,
+                "timestep_start": _ * 270,
                 "annotation": annotation
             })
 

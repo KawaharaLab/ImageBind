@@ -17,7 +17,7 @@ from imagebind.models.force_model import load_model
 BASE_PATH = '/home/mdxuser/ImageBind/src'
 
 
-TRAIN_CSV = "/home/mdxuser/Genesis/main/data/picked_up/formatted_training_data_IB.csv"
+TRAIN_CSV = "/home/mdxuser/Genesis/main/data/picked_up/simple_formatted_training_data_IB.csv"
 MODEL_DIR = "/home/mdxuser/ImageBind/simple/contrastive_force_test"
 
 ALL_COLS = [
@@ -105,9 +105,11 @@ class CustomLRScheduler(_LRScheduler):
 
 
 def train():
+    min_val_loss = 999999999
+    min_val_loss_epoch = 0
     wandb.login(key="3f9edde5e58f6c9eab6123b18cf61030047ba716")
     wandb.init(project="imagebind_force_test", config={
-        "batch_size": 64,
+        "batch_size": 256,
         "epochs": 400,
         "warmup_epochs": 20,
         "peak_lr": 1e-3,
@@ -117,7 +119,7 @@ def train():
         "data_len": 100,
         "temperature": 0.07,
         "mode": "normal",
-        "validation_split": 0.1 # <-- NEW: Add validation split to config
+        "validation_split": 0.4 # <-- NEW: Add validation split to config
     })
 
     cfg = wandb.config
@@ -203,16 +205,20 @@ def train():
         # === 3. LOG THE VALIDATION LOSS ===
         wandb.log({
             "train_loss": epoch_loss / len(train_loader),
-            "val_loss": val_loss / len(val_loader), # <-- MODIFIED
+            "val_loss": val_loss / len(val_loader), 
             "epoch": epoch + 1,
             "learning_rate": scheduler.get_last_lr()[0],
         })
 
         if (epoch + 1) % 50 == 0:
             torch.save(force_encoder.state_dict(), f"{MODEL_DIR}/{run_name}_epoch_{epoch+1}.pth")
+        if val_loss < min_val_loss:
+            print(f'New min val loss = {val_loss} vs. prev {min_val_loss}. Diff = {min_val_loss - val_loss}')
+            min_val_loss = val_loss
+            min_val_loss_epoch = epoch
 
     torch.save(force_encoder.state_dict(), f"{MODEL_DIR}/{run_name}_final.pth")
-    print(f"Finished training. Model saved to {MODEL_DIR}/{run_name}_final.pth")
+    print(f"Finished training. Model saved to {MODEL_DIR}/{run_name}_final.pth. Best val_loss: {min_val_loss} at epoch {min_val_loss_epoch}")
 
 if __name__ == "__main__":
     train()
