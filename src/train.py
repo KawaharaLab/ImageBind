@@ -34,18 +34,30 @@ PURE_FORCE_COLS = [
     "left_fx",
     "left_fy",
     "left_fz",
+    "left_tx",
+    "left_ty",
+    "left_tz",
     "right_fx",
     "right_fy",
     "right_fz",
+    "right_tx",
+    "right_ty",
+    "right_tz"
 ]
 
 COMPACT_FORCE_COLS = [
     "left_fx",
     "left_fy",
     "left_fz",
+    "left_tx",
+    "left_ty",
+    "left_tz",
     "right_fx",
     "right_fy",
     "right_fz",
+    "right_tx",
+    "right_ty",
+    "right_tz",
     "dof_7",
     "dof_8",
 ]
@@ -82,8 +94,8 @@ class ForceDataset(Dataset):
     def __init__(
         self,
         # device はここから削除します
-        data_dir: str = "/home/mdxuser/sim/Genesis/data/",
-        data_len: int = 3000,
+        data_dir: str = "/home/mdxuser/ImageBind/data/YCB_0824/",
+        data_len: int = 80,
         use_cols: list = PURE_FORCE_COLS,
     ):
         super().__init__()
@@ -102,7 +114,7 @@ class ForceDataset(Dataset):
         
         # 2. 全てのCSVを一度だけ読み、辞書にキャッシュする
         data_cache = {
-            path: pd.read_csv("/home/mdxuser/sim/Genesis/" + path, usecols=self.use_cols).iloc[::3000//self.data_len].reset_index(drop=True).values.astype("float32")
+            path: pd.read_csv(data_dir + "csv/" + path, usecols=self.use_cols).values.astype("float32")
             for path in unique_csv_paths
         }
         print(f"Loaded {len(data_cache)} unique CSV files into memory.")
@@ -110,7 +122,7 @@ class ForceDataset(Dataset):
         # 3. 各サンプルをメモリ上のデータへの参照として保持
         for _, row in train_df.iterrows():
             csv_path = row["csv_path"]
-            start_id = row["timestep_start"]*data_len//3000  # 3000msを基準にスケーリング
+            start_id = row["start"]
             
             # メモリ上のNumPy配列から直接スライスして追加
             force_segment = data_cache[csv_path][start_id : start_id + self.data_len, :]
@@ -142,30 +154,31 @@ class ForceDataset(Dataset):
 
 
 def main(
-    epochs: int = 2000,
+    epochs: int = 100,
     warmup_epochs: int = 20,
     batch_size: int = 128,
     gradient_clipping: float = 1.0,
-    data_dir: str = "/home/mdxuser/sim/Genesis/data/",
+    data_dir: str = "/home/mdxuser/ImageBind/data/YCB_0824/",
     temperature: float = 0.4,
     weight_decay = None,
     peak_lr: float = 5e-4,
     drop_path: float = 0.3,
     num_blocks: int = 4,
     out_embed_dim: int = 512,
-    data_len: int = 300,
-    mode: str = "normal",
+    data_len: int = 80,
+    mode: str = "compact",
 ):
     if mode == "pure":
-        data_channels = 6
+        data_channels = 12
         use_cols = PURE_FORCE_COLS
+        project_name = "icra_force_torque"
     elif mode == "compact":
-        data_channels = 8
+        data_channels = 14
         use_cols = COMPACT_FORCE_COLS
+        project_name = "icra_force_torque_width"
     else:
         data_channels = 15
         use_cols = ALL_COLS
-    project_name = "imagebind_force_simple"
     model_name = mode
     wandb.login(key="c85b817c62f441243d232b381088358e72fa2b19")
     wandb.init(

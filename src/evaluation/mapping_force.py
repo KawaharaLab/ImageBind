@@ -12,7 +12,7 @@ from fire import Fire
 import clip
 from imagebind.models.force_model import load_model
 
-data_dir = "/home/mdxuser/sim/Genesis/data/"
+data_dir = "/home/mdxuser/ImageBind/data/YCB_0824/"
 
 ALL_COLS = [
     "left_fx",
@@ -36,17 +36,29 @@ PURE_FORCE_COLS = [
     "left_fx",
     "left_fy",
     "left_fz",
+    "left_tx",
+    "left_ty",
+    "left_tz",
     "right_fx",
     "right_fy",
     "right_fz",
+    "right_tx",
+    "right_ty",
+    "right_tz",
 ]
 COMPACT_FORCE_COLS = [
     "left_fx",
     "left_fy",
     "left_fz",
+    "left_tx",
+    "left_ty",
+    "left_tz",
     "right_fx",
     "right_fy",
     "right_fz",
+    "right_tx",
+    "right_ty",
+    "right_tz",
     "dof_7",
     "dof_8",
 ]
@@ -57,13 +69,13 @@ def plotting(name, length="short", type="normal"):
     drop_path: float = 0.3
     num_blocks: int = 4
     out_embed_dim: int = 512
-    data_len: int = 300
+    data_len: int = 80
     mode = "pure"
     cnn = False
     #==========================================================================
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if mode == "pure":
-        data_channels = 6
+        data_channels = 12
         use_cols = PURE_FORCE_COLS
     elif mode == "compact":
         data_channels = 8
@@ -94,8 +106,8 @@ def plotting(name, length="short", type="normal"):
     labels = []
     for _, row in eval_df.iterrows():
         force_csv = row["csv_path"]
-        start = row["timestep_start"]*data_len//3000
-        force_df = pd.read_csv(force_csv).iloc[::3000//data_len].reset_index(drop=True)
+        start = row["start"]
+        force_df = pd.read_csv(data_dir + "csv/" + force_csv)
         arr = force_df[use_cols].values.astype("float32")[start : start + data_len, :]
         # NaN 補間
         # for col in range(arr.shape[1]):
@@ -230,7 +242,7 @@ def main(name):
     # plotting(name, length="short", type="normal")
     plotting(name, length="long", type="normal")
     # plotting(name, length="short", type="textbase")
-    # plotting(name, length="long", type="textbase")
+    plotting(name, length="long", type="textbase")
 
 
 if __name__ == "__main__":

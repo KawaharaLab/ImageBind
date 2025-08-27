@@ -10,3 +10,6 @@ venv/
 data
 uv.lock
 wandb
+ESEP_data/
+csv/
+simple/

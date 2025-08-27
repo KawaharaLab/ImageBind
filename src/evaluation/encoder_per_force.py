@@ -26,23 +26,35 @@ ALL_COLS = [
     "dof_5",
     "dof_6",
     "dof_7",
-    "dof_8",
+    "dof_8"
 ]
 PURE_FORCE_COLS = [
     "left_fx",
     "left_fy",
     "left_fz",
+    "left_tx",
+    "left_ty",
+    "left_tz",
     "right_fx",
     "right_fy",
     "right_fz",
+    "right_tx",
+    "right_ty",
+    "right_tz"
 ]
 COMPACT_FORCE_COLS = [
     "left_fx",
     "left_fy",
     "left_fz",
+    "left_tx",
+    "left_ty",
+    "left_tz",
     "right_fx",
     "right_fy",
     "right_fz",
+    "right_tx",
+    "right_ty",
+    "right_tz",
     "dof_7",
     "dof_8",
 ]
@@ -53,13 +65,13 @@ def main(model_path):
     drop_path: float = 0.3
     num_blocks: int = 4
     out_embed_dim: int = 512
-    data_len: int = 300
+    data_len: int = 80
     mode = "pure"
     cnn = False  # CNN モデルを使うかどうか
     #==========================================================================
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if mode == "pure":
-        data_channels = 6
+        data_channels = 12
         use_cols = PURE_FORCE_COLS
     elif mode == "compact":
         data_channels = 8
@@ -103,8 +115,8 @@ def main(model_path):
     total = 0
     for _, row in eval_df.iterrows():
         force_csv = row["csv_path"]
-        start = row["timestep_start"]*data_len//3000
-        force_df = pd.read_csv(force_csv).iloc[::3000//data_len].reset_index(drop=True)
+        start = row["timestep_start"]
+        force_df = pd.read_csv(force_csv)
         correct = "False"
         force_array = force_df[use_cols].values.astype("float32")[start : start + data_len, :]
         # for col in range(len(ALL_COLS)):
@@ -121,13 +133,10 @@ def main(model_path):
             fe = force_encoder(force_tensor)  # → (1, D)
             # labels_encoded も正規化済み (N_labels, D)
             cos_sim = fe @ labels_encoded.T  # → (1, N_labels)
-            # 温度スケールを反映
             logits = cos_sim
 
-        # 各ラベルのスコアを取り出し
         scores = logits.squeeze(0)  # Tensor of shape (N_labels,)
 
-        # (2) 最も高いスコアのラベルを予測
         pred_idx = scores.argmax().item()
         pred_label = labels[pred_idx]
         # confusion matrix 更新
