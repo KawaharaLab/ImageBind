@@ -440,6 +440,54 @@ class ImageBindModel(nn.Module):
         )
 
         return nn.ModuleDict(modality_postprocessors)
+    
+    def encode_image(self, images):
+        """
+        Encode images into embeddings.
+        :param images: Input images tensor.
+        :return: Encoded image embeddings.
+        """
+        if images.ndim >= 5:
+            B, S = images.shape[:2]
+            images = images.reshape(B * S, *images.shape[2:])
+        preprocessed = self.modality_preprocessors[ModalityType.VISION](vision=images)
+        trunk_inputs = preprocessed["trunk"]
+        head_inputs = preprocessed["head"]
+        encoded_images = self.modality_trunks[ModalityType.VISION](**trunk_inputs)
+        encoded_images = self.modality_heads[ModalityType.VISION](
+            encoded_images, **head_inputs
+        )
+        return self.modality_postprocessors[ModalityType.VISION](encoded_images)
+        
+    def encode_imu(self, imus):
+        """
+        Encode IMU data into embeddings.
+        :param imus: Input IMU data tensor.
+        :return: Encoded IMU embeddings.
+        """
+        preprocessed = self.modality_preprocessors[ModalityType.IMU](imu=imus)
+        trunk_inputs = preprocessed["trunk"]
+        head_inputs = preprocessed["head"]
+        encoded_imus = self.modality_trunks[ModalityType.IMU](**trunk_inputs)
+        encoded_imus = self.modality_heads[ModalityType.IMU](
+            encoded_imus, **head_inputs
+        )
+        return self.modality_postprocessors[ModalityType.IMU](encoded_imus)
+    
+    def encode_text(self, texts):
+        """
+        Encode text into embeddings.
+        :param texts: Input text tensor.
+        :return: Encoded text embeddings.
+        """
+        preprocessed = self.modality_preprocessors[ModalityType.TEXT](text=texts)
+        trunk_inputs = preprocessed["trunk"]
+        head_inputs = preprocessed["head"]
+        encoded_texts = self.modality_trunks[ModalityType.TEXT](**trunk_inputs)
+        encoded_texts = self.modality_heads[ModalityType.TEXT](
+            encoded_texts, **head_inputs
+        )
+        return self.modality_postprocessors[ModalityType.TEXT](encoded_texts)
 
     def forward(self, inputs):
         outputs = {}
@@ -490,7 +538,7 @@ def imagebind_huge(pretrained=False):
     )
 
     if pretrained:
-        if not os.path.exists(".checkpoints/imagebind_huge.pth"):
+        if not os.path.exists("model_imagebind_imu.pth"):
             print(
                 "Downloading imagebind weights to .checkpoints/imagebind_huge.pth ..."
             )
@@ -501,6 +549,44 @@ def imagebind_huge(pretrained=False):
                 progress=True,
             )
 
-        model.load_state_dict(torch.load(".checkpoints/imagebind_huge.pth"))
+        model.load_state_dict(torch.load("model_imagebind_imu.pth"))
+
+    return model
+
+
+def imagebind_huge_imu(pretrained=False):
+    model = ImageBindModel(
+        vision_embed_dim=1280,
+        vision_num_blocks=32,
+        vision_num_heads=16,
+        text_embed_dim=1024,
+        text_num_blocks=24,
+        text_num_heads=16,
+        out_embed_dim=1024,
+        audio_drop_path=0.1,
+        imu_drop_path=0.7,
+    )
+
+    if pretrained:
+        ckpt_path = ".checkpoints/imagebind_huge.pth"
+        if not os.path.exists(ckpt_path):
+            print("Downloading imagebind weights to {} ...".format(ckpt_path))
+            os.makedirs(".checkpoints", exist_ok=True)
+            torch.hub.download_url_to_file(
+                "https://dl.fbaipublicfiles.com/imagebind/imagebind_huge.pth",
+                ckpt_path,
+                progress=True,
+            )
+
+        # プリトレーニング済みの重みを全てロード
+        pretrained_sd = torch.load(ckpt_path)
+        # print(f"Loaded state dict keys: {list(pretrained_sd.keys())}")
+
+        # "imu"に関連するパラメータを除外
+        filtered_sd = {k: v for k, v in pretrained_sd.items() if "imu" not in k}
+        # print(f"Filtered state dict keys: {list(filtered_sd.keys())}")
+
+        # strict=Falseにより、filtered_sdに含まれていないキー（例：imu）はそのまま初期値が保たれる
+        model.load_state_dict(filtered_sd, strict=False)
 
     return model
