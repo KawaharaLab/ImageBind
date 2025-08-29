@@ -12,6 +12,10 @@ import clip
 import wandb
 from imagebind.models.force_model import load_model
 
+DATA_TYPE = "raw"
+
+DATA_DIR = f"/home/user/Genesis/data/{DATA_TYPE}/"
+
 ALL_COLS = [
     "left_fx",
     "left_fy",
@@ -93,8 +97,6 @@ class CustomLRScheduler(_LRScheduler):
 class ForceDataset(Dataset):
     def __init__(
         self,
-        # device はここから削除します
-        data_dir: str = "/home/mdxuser/ImageBind/data/YCB_0824/",
         data_len: int = 80,
         use_cols: list = PURE_FORCE_COLS,
     ):
@@ -102,7 +104,7 @@ class ForceDataset(Dataset):
         self.data_len = data_len
         self.use_cols = use_cols
 
-        train_csv = os.path.join(data_dir, "train.csv")
+        train_csv = os.path.join(DATA_DIR, "train.csv")
         train_df = pd.read_csv(train_csv)
         
         # --- ここからが改善点 ---
@@ -114,7 +116,7 @@ class ForceDataset(Dataset):
         
         # 2. 全てのCSVを一度だけ読み、辞書にキャッシュする
         data_cache = {
-            path: pd.read_csv(data_dir + "csv/" + path, usecols=self.use_cols).values.astype("float32")
+            path: pd.read_csv(DATA_DIR + "csv/" + path, usecols=self.use_cols).values.astype("float32")
             for path in unique_csv_paths
         }
         print(f"Loaded {len(data_cache)} unique CSV files into memory.")
@@ -134,7 +136,7 @@ class ForceDataset(Dataset):
         # --- 改善点ここまで ---
 
         if not self.force_segments:
-            raise RuntimeError(f"No usable pairs in {data_dir}")
+            raise RuntimeError(f"No usable pairs in {DATA_DIR}")
 
     def __len__(self):
         return len(self.force_segments)
@@ -154,19 +156,18 @@ class ForceDataset(Dataset):
 
 
 def main(
-    epochs: int = 100,
+    epochs: int = 1000,
     warmup_epochs: int = 20,
     batch_size: int = 128,
     gradient_clipping: float = 1.0,
-    data_dir: str = "/home/mdxuser/ImageBind/data/YCB_0824/",
-    temperature: float = 0.4,
+    temperature: float = 0.2,
     weight_decay = None,
     peak_lr: float = 5e-4,
     drop_path: float = 0.3,
-    num_blocks: int = 4,
+    num_blocks: int = 6,
     out_embed_dim: int = 512,
     data_len: int = 80,
-    mode: str = "compact",
+    mode: str = "pure",
 ):
     if mode == "pure":
         data_channels = 12
@@ -207,7 +208,7 @@ def main(
     # device = torch.device("cpu")
     print(f"Using device: {device}")
 
-    train_dataset = ForceDataset(data_dir=data_dir, data_len=data_len, use_cols=use_cols)
+    train_dataset = ForceDataset(data_dir=DATA_DIR, data_len=data_len, use_cols=use_cols)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, drop_last=True

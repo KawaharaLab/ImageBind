@@ -1,6 +1,6 @@
 import pandas as pd
 
-data_dir = "/home/mdxuser/ImageBind/data/YCB_0824/"
+data_dir = "/home/user/Genesis/data/YCB_0824/"
 
 df = pd.read_csv(data_dir + "eval.csv")
 

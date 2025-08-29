@@ -12,7 +12,9 @@ from fire import Fire
 import clip
 from imagebind.models.force_model import load_model
 
-data_dir = "/home/mdxuser/ImageBind/data/YCB_0824/"
+BASE_DIR = "/home/user/ImageBind/"
+
+data_dir = "/home/user/Genesis/data/YCB_0824/"
 
 ALL_COLS = [
     "left_fx",
@@ -67,7 +69,7 @@ def plotting(name, length="short", type="normal"):
     #========================== TODO: change to json ============================
     temperature: float = 0.2
     drop_path: float = 0.3
-    num_blocks: int = 4
+    num_blocks: int = 6
     out_embed_dim: int = 512
     data_len: int = 80
     mode = "pure"
@@ -78,7 +80,7 @@ def plotting(name, length="short", type="normal"):
         data_channels = 12
         use_cols = PURE_FORCE_COLS
     elif mode == "compact":
-        data_channels = 8
+        data_channels = 14
         use_cols = COMPACT_FORCE_COLS
     else:
         data_channels = 15
@@ -90,7 +92,7 @@ def plotting(name, length="short", type="normal"):
     else:
         from imagebind.models.force_model import load_model
         force_encoder = load_model(
-            pretrained=True, ckpt_path=f"/home/mdxuser/ImageBind/data/{mode}/{name}.pth",
+            pretrained=True, ckpt_path=f"{BASE_DIR}data/{mode}/{name}.pth",
             drop_path=drop_path, num_blocks=num_blocks, out_embed_dim=out_embed_dim, data_channels=data_channels, data_len=data_len, temperature=temperature
         ).to(device).float()
 
