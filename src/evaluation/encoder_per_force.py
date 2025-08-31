@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 import numpy as np
 import pandas as pd
@@ -9,7 +10,8 @@ from fire import Fire
 import clip
 from imagebind import data
 
-data_dir = "/home/mdxuser/sim/Genesis/data/"
+data_dir = "/home/mdxuser/sim/Genesis/data/YCB_0824/"
+BASE_DIR = "/home/user/ImageBind/"
 
 ALL_COLS = [
     "left_fx",
@@ -59,16 +61,20 @@ COMPACT_FORCE_COLS = [
     "dof_8",
 ]
 
-def main(model_path):
+def main(name):
     #========================== TODO: change to json ============================
     temperature: float = 0.2
     drop_path: float = 0.3
-    num_blocks: int = 4
+    num_blocks: int = 6
     out_embed_dim: int = 512
     data_len: int = 80
     mode = "pure"
     cnn = False  # CNN モデルを使うかどうか
     #==========================================================================
+    model_path = f"{BASE_DIR}data/{mode}/{name}.pth"
+    out_dir = f"{BASE_DIR}data/{name}/"
+    os.mkdir(out_dir, exist_ok=True)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if mode == "pure":
         data_channels = 12
@@ -113,6 +119,8 @@ def main(model_path):
 
     n_correct = 0
     total = 0
+    with open(out_dir + "predictions_new.csv", "w") as f:
+        f.write("csv_path,start,true_label,pred_label\n")
     for _, row in eval_df.iterrows():
         force_csv = row["csv_path"]
         start = row["timestep_start"]
@@ -149,41 +157,27 @@ def main(model_path):
         # logits: Tensor of shape (1, N_labels)
         probs = torch.softmax(logits, dim=-1)  # → (1, N_labels), 全て0～1, 合計1
         print(probs)
-        # (3) ファイルにも全スコアを追記
-        with open(data_dir + "predictions_new.txt", "a") as f:
-            line = f"{row['csv_path']},{start},{correct},{row['label']},{pred_label}"
-            for p in probs[0]:
-                line += f",{p.item():.4f}"
-            f.write(line + "\n")
-
-        # 各ラベルの確率を出力
-        # for idx, label in enumerate(labels):
-        #     print(f"  {label}: {probs[0, idx].item():.4f}")
+        with open(out_dir + "predictions_new.csv", "a") as f:
+            line = f"{row['csv_path']},{start},{row['label']},{pred_label}\n"
+            f.write(line)
 
         total += 1
         print(f"Predict={pred_label} True={row['label']} Total={total}, Correct={n_correct}")
 
-    # ─── ループ終了後にマークダウン形式でサマリー出力 ───
     md_lines = []
-    # ヘッダ行
     md_lines.append("| True \\ Predicted | " + " | ".join([f"{p}" for p in labels]) + " |")
-    # 区切り行
     sep = "|:-------------------|" + "|".join([":----------------:" for _ in labels]) + "|"
     md_lines.append(sep)
-    # 各行データ
     for t in labels:
         counts = [f"{confusion[t][p]:>3}" for p in labels]
         md_lines.append(f"| {t:<18} | " + " | ".join(counts) + " |")
 
-    # ファイルに書き出し
-    out_path = "data/prediction_summary.md"
+    out_path = f"{out_dir}prediction_summary.md"
     with open(out_path, "w") as f:
         f.write("\n".join(md_lines))
-    print(f"Saved prediction summary → {out_path}")
 
+    print(f"Saved prediction summary → {out_path}")
     print(f"Accuracy: {n_correct / total * 100:.2f}%")
-    with open(data_dir + "predictions_new.txt", "a") as f:
-        f.write(f"Accuracy: {n_correct / total * 100:.2f}%\n")
 
 
 if __name__ == "__main__":
