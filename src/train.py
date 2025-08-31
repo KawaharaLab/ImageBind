@@ -208,7 +208,7 @@ def main(
     # device = torch.device("cpu")
     print(f"Using device: {device}")
 
-    train_dataset = ForceDataset(data_dir=DATA_DIR, data_len=data_len, use_cols=use_cols)
+    train_dataset = ForceDataset(data_len=data_len, use_cols=use_cols)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, drop_last=True
