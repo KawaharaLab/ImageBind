@@ -8,31 +8,16 @@ import torch
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader, Dataset
 
-import clip
 import wandb
 from imagebind.models.force_model import load_model
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-DATA_TYPE = "raw"
+
+DATA_TYPE = "train"
 
 DATA_DIR = f"/home/user/Genesis/data/{DATA_TYPE}/"
-
-ALL_COLS = [
-    "left_fx",
-    "left_fy",
-    "left_fz",
-    "right_fx",
-    "right_fy",
-    "right_fz",
-    "dof_0",
-    "dof_1",
-    "dof_2",
-    "dof_3",
-    "dof_4",
-    "dof_5",
-    "dof_6",
-    "dof_7",
-    "dof_8",
-]
 
 PURE_FORCE_COLS = [
     "left_fx",
@@ -67,21 +52,60 @@ COMPACT_FORCE_COLS = [
 ]
 
 
+class SigmoidLoss(nn.Module):
+    """
+    Implementation of Sigmoid Loss proposed in SigLIP.
+    Includes learnable temperature (t) and bias (b).
+    """
+    def __init__(self, initial_t_prime=0.0, initial_b=0.0):
+        super(SigmoidLoss, self).__init__()
+        # Register as nn.Parameter to make it part of the optimizer's parameters
+        self.t_prime = nn.Parameter(torch.tensor(initial_t_prime))
+        self.b = nn.Parameter(torch.tensor(initial_b))
+
+    def forward(self, force_embeddings, text_embeddings):
+        """
+        Args:
+            force_embeddings (torch.Tensor): Output of the force encoder [n, dim]
+            text_embeddings (torch.Tensor): Output of the text encoder [n, dim]
+        """
+        n = force_embeddings.shape[0]
+        device = force_embeddings.device
+
+        # 2. Compute temperature (t) and bias (b)
+        # Use exp to ensure t remains positive
+        t = torch.exp(self.t_prime)
+
+        # 3. Compute logits
+        # (zimg @ ztxt.T) * t + b
+        logits = (force_embeddings @ text_embeddings.T) * t + self.b
+        
+        # 4. Create label matrix (-1 with diagonal elements as 1)
+        # 2 * eye(n) - ones(n)
+        labels = 2 * torch.eye(n, device=device) - torch.ones(n, n, device=device)
+
+        # 5. Compute loss
+        # -sum(log_sigmoid(labels * logits)) / n
+        loss = -torch.sum(F.logsigmoid(labels * logits)) / n
+        
+        return loss
+
+
 class CustomLRScheduler(_LRScheduler):
     def __init__(self, peak_lr, warmup_epochs, total_epochs, optimizer, last_epoch=-1):
-        # 先にget_lrで必要となる独自の属性を定義する
+        # Define custom attributes required by get_lr
         self.warmup_epochs = warmup_epochs
         self.total_epochs = total_epochs
-        # optimizerのパラメータグループの数に合わせてbase_lrsを定義すると、より堅牢になります
+        # Define base_lrs to match the number of parameter groups in the optimizer for robustness
         self.base_lrs = [peak_lr] * len(optimizer.param_groups)
 
-        # 最後に親クラスの__init__を呼び出す
+        # Finally, call the parent class's __init__
         super(CustomLRScheduler, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
         return self.base_lrs
         if self.last_epoch < self.warmup_epochs:
-            return [base_lr * (self.last_epoch + 1) / self.warmup_epochs for base_lr in self.base_lrs]  # ウォームアップ期間中は線形増加
+            return [base_lr * (self.last_epoch + 1) / self.warmup_epochs for base_lr in self.base_lrs]  # Linear increase during warmup
         else:
             decay_ratio = 0.5 * (
                 1
@@ -104,36 +128,32 @@ class ForceDataset(Dataset):
         self.data_len = data_len
         self.use_cols = use_cols
 
-        train_csv = os.path.join(DATA_DIR, "train.csv")
+        train_csv = os.path.join(DATA_DIR, "train_thin_20pct.csv")
         train_df = pd.read_csv(train_csv)
-        
-        # --- ここからが改善点 ---
-        self.annotations = []
+
+        self.annotations_emb = []
         self.force_segments = []
         
-        # 1. ユニークなCSVパスを取得
         unique_csv_paths = train_df["csv_path"].unique()
         
-        # 2. 全てのCSVを一度だけ読み、辞書にキャッシュする
         data_cache = {
             path: pd.read_csv(DATA_DIR + "csv/" + path, usecols=self.use_cols).values.astype("float32")
             for path in unique_csv_paths
         }
         print(f"Loaded {len(data_cache)} unique CSV files into memory.")
 
-        # 3. 各サンプルをメモリ上のデータへの参照として保持
         for _, row in train_df.iterrows():
             csv_path = row["csv_path"]
             start_id = row["start"]
-            
-            # メモリ上のNumPy配列から直接スライスして追加
+            emb_path = f"{DATA_DIR}text_emb/{row['emb_index']}.pt"
             force_segment = data_cache[csv_path][start_id : start_id + self.data_len, :]
             if force_segment.shape[0] != self.data_len:
                 print(f"Warning: Skipping segment from {csv_path} at start_id {start_id} due to shape mismatch.")
                 continue
+
+            text_emb = torch.load(emb_path, map_location="cpu")
             self.force_segments.append(force_segment)
-            self.annotations.append(row["annotation"])
-        # --- 改善点ここまで ---
+            self.annotations_emb.append(text_emb)
 
         if not self.force_segments:
             raise RuntimeError(f"No usable pairs in {DATA_DIR}")
@@ -143,49 +163,41 @@ class ForceDataset(Dataset):
 
     def __getitem__(self, idx):
         force_array = self.force_segments[idx]
-        annotation_text = self.annotations[idx]
+        force_tensor = torch.from_numpy(force_array).T
         
-        # torch.from_numpy は高速
-        force_tensor = torch.from_numpy(force_array).T  # → (15, T)
-        
-        # TokenizeはCPUで行う
-        annotation = clip.tokenize(annotation_text)[0]
+        annotation_emb = self.annotations_emb[idx]
 
-        # GPUへの転送はここでは行わない！
-        return force_tensor, annotation
+        return force_tensor, annotation_emb
 
 
 def main(
-    epochs: int = 1000,
+    epochs: int = 100,
     warmup_epochs: int = 20,
-    batch_size: int = 128,
+    batch_size: int = 512,
     gradient_clipping: float = 1.0,
     temperature: float = 0.2,
     weight_decay = None,
     peak_lr: float = 5e-4,
     drop_path: float = 0.3,
     num_blocks: int = 6,
-    out_embed_dim: int = 512,
+    out_embed_dim: int = 768,
     data_len: int = 80,
     mode: str = "pure",
 ):
     if mode == "pure":
         data_channels = 12
         use_cols = PURE_FORCE_COLS
-        project_name = "icra_force_torque"
+        project_name = "icra_siglip"
     elif mode == "compact":
         data_channels = 14
         use_cols = COMPACT_FORCE_COLS
-        project_name = "icra_force_torque_width"
-    else:
-        data_channels = 15
-        use_cols = ALL_COLS
-    model_name = mode
+        project_name = "icra_siglip_width"
+
     wandb.login(key="c85b817c62f441243d232b381088358e72fa2b19")
     wandb.init(
         project=project_name,
         config={
-            "model": model_name,
+            "model": mode,
             "batch_size": batch_size,
             "epochs": epochs,
             "warmup_epochs": warmup_epochs,
@@ -197,6 +209,7 @@ def main(
             "num_blocks": num_blocks,
             "out_embed_dim": out_embed_dim,
             "data_len": data_len,
+            "train_thinout": 20,
         },
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -204,7 +217,6 @@ def main(
         # pretrained=True, ckpt_path="/home/mdxuser/ImageBind/data/normal/skilled-sky-26.pth",
         drop_path=drop_path, num_blocks=num_blocks, out_embed_dim=out_embed_dim, data_channels=data_channels, data_len=data_len, temperature=temperature
     ).to(device).float()
-    CLIP_encoder, _ = clip.load("ViT-B/16", device=device)
     # device = torch.device("cpu")
     print(f"Using device: {device}")
 
@@ -214,33 +226,29 @@ def main(
         train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, drop_last=True
     )
     # optimizer = torch.optim.Adam(force_encoder.parameters(), lr=peak_lr, weight_decay=weight_decay)
-    optimizer = torch.optim.Adam(force_encoder.parameters(), lr=peak_lr)
+    criterion = SigmoidLoss().to(device)
+    import itertools
+    all_params = itertools.chain(force_encoder.parameters(), criterion.parameters())
+    optimizer = torch.optim.Adam(all_params, lr=peak_lr)
 
     scheduler = CustomLRScheduler(peak_lr, warmup_epochs, epochs, optimizer)
 
-    criterion = torch.nn.CrossEntropyLoss()
-    os.makedirs(f"data/{model_name}", exist_ok=True)
+    os.makedirs(f"data/models/siglip/{mode}", exist_ok=True)
     run_name = wandb.run.name
     for epoch in range(epochs):
         force_encoder.train()
-        CLIP_encoder.eval()  # CLIPのエンコーダは評価モードに設定
         scheduler.step()
         train_loss = 0
-        for i, (forces, annotations) in enumerate(train_loader):
+        for i, (forces, annotations_emb) in enumerate(train_loader):
             print(f"Epoch [{epoch + 1}/{epochs}], Step [{i + 1}/{len(train_loader)}]")
             optimizer.zero_grad()
+
             forces = forces.to(device, dtype=torch.float32)
-            annotations = annotations.to(device)
             Force_e = force_encoder(forces)
-            with torch.no_grad():
-                Text_f = CLIP_encoder.encode_text(annotations).float()
             Force_e = Force_e / Force_e.norm(dim=-1, keepdim=True)
-            Text_e = Text_f / Text_f.norm(dim=-1, keepdim=True)
-            logits = Force_e @ Text_e.T
-            labels = torch.arange(len(annotations)).to(device)
-            loss_force = criterion(logits, labels)
-            loss_text = criterion(logits.T, labels)
-            loss = (loss_text + loss_force) / 2.0
+
+            Text_e = annotations_emb.to(device)
+            loss = criterion(Force_e, Text_e)
             if torch.isnan(loss):
                 print(f"NaN detected at Epoch [{epoch + 1}], Step [{i}]")
                 return
@@ -259,9 +267,9 @@ def main(
         )
         if epoch % 50 == 0:
             torch.save(
-                force_encoder.state_dict(), f"data/{model_name}/{run_name}_epoch_{epoch + 1}.pth"
+                force_encoder.state_dict(), f"data/models/siglip/{mode}/{run_name}_epoch_{epoch}.pth"
             )
-    torch.save(force_encoder.state_dict(), f"data/{model_name}/{run_name}.pth")
+    torch.save(force_encoder.state_dict(), f"data/models/siglip/{mode}/{run_name}.pth")
     print(f"Training complete. Model saved as {run_name}.pth")
 
 

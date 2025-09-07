@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-matplotlib.use("Agg")  # GUI なしでも動かす
+matplotlib.use("Agg")  # Run without GUI
 import matplotlib.pyplot as plt
 import umap
 from fire import Fire
@@ -14,25 +14,7 @@ from imagebind.models.force_model import load_model
 
 BASE_DIR = "/home/user/ImageBind/"
 
-data_dir = "/home/user/Genesis/data/YCB_0824/"
-
-ALL_COLS = [
-    "left_fx",
-    "left_fy",
-    "left_fz",
-    "right_fx",
-    "right_fy",
-    "right_fz",
-    "dof_0",
-    "dof_1",
-    "dof_2",
-    "dof_3",
-    "dof_4",
-    "dof_5",
-    "dof_6",
-    "dof_7",
-    "dof_8",
-]
+data_dir = "/home/user/Genesis/data/eval/"
 
 PURE_FORCE_COLS = [
     "left_fx",
@@ -48,6 +30,7 @@ PURE_FORCE_COLS = [
     "right_ty",
     "right_tz",
 ]
+
 COMPACT_FORCE_COLS = [
     "left_fx",
     "left_fy",
@@ -70,7 +53,7 @@ def plotting(name, length="short", type="normal"):
     temperature: float = 0.2
     drop_path: float = 0.3
     num_blocks: int = 6
-    out_embed_dim: int = 512
+    out_embed_dim: int = 768
     data_len: int = 80
     mode = "pure"
     cnn = False
@@ -82,9 +65,6 @@ def plotting(name, length="short", type="normal"):
     elif mode == "compact":
         data_channels = 14
         use_cols = COMPACT_FORCE_COLS
-    else:
-        data_channels = 15
-        use_cols = ALL_COLS
 
     if cnn == True:
         from imagebind.models.force_model_cnn import load_model
@@ -92,36 +72,35 @@ def plotting(name, length="short", type="normal"):
     else:
         from imagebind.models.force_model import load_model
         force_encoder = load_model(
-            pretrained=True, ckpt_path=f"{BASE_DIR}data/{mode}/{name}.pth",
+            pretrained=True, ckpt_path=f"{BASE_DIR}data/models/clip/{mode}/{name}.pth",
             drop_path=drop_path, num_blocks=num_blocks, out_embed_dim=out_embed_dim, data_channels=data_channels, data_len=data_len, temperature=temperature
         ).to(device).float()
 
 
     force_encoder.eval().to(device)
-    text_encoder, _ = clip.load("ViT-B/16", device=device)
+    text_encoder, _ = clip.load("ViT-L/14@336px", device=device)
 
     eval_df = pd.read_csv(data_dir + "eval.csv")
 
-    # ───────────── UMAP 用に force 埋め込みを収集 ─────────────
+    # Collect force embeddings for UMAP
     force_feats = []
-    labels_feats = []  # ラベルの埋め込みを保存するリスト
+    labels_feats = []  # Store text label embeddings
     labels = []
+    skipped = 0
     for _, row in eval_df.iterrows():
         force_csv = row["csv_path"]
         start = row["start"]
         force_df = pd.read_csv(data_dir + "csv/" + force_csv)
         arr = force_df[use_cols].values.astype("float32")[start : start + data_len, :]
-        # NaN 補間
-        # for col in range(arr.shape[1]):
-        #     y = arr[:, col]
-        #     x = np.arange(len(y))
-        #     mask = ~np.isnan(y)
-        #     arr[:, col] = np.interp(x, x[mask], y[mask])
-        force_tensor = torch.from_numpy(arr).T.unsqueeze(0).to(device)  # → (1, 15, T)
+        # Skip segments shorter than data_len to avoid positional embedding mismatch
+        if arr.shape[0] != data_len:
+            skipped += 1
+            continue
+        force_tensor = torch.from_numpy(arr).T.unsqueeze(0).to(device)  # (1, C, T)
 
-        # エンコード＆正規化
+        # Encode & normalize
         with torch.no_grad():
-            emb = force_encoder(force_tensor)  # → (1, D)
+            emb = force_encoder(force_tensor)  # (1, D)
         force_feats.append(emb.cpu().numpy().reshape(-1))
         if length == "long":
             label_preprocessed = clip.tokenize([row["label"]]).to(device)
@@ -129,34 +108,38 @@ def plotting(name, length="short", type="normal"):
             label_preprocessed = clip.tokenize([row["label_short"]]).to(device)
         with torch.no_grad():
             label_emb = text_encoder.encode_text(label_preprocessed)
-            print(f"label_emb shape: {label_emb.shape}")  # (1, D)
             labels_feats.append(label_emb.cpu().numpy().reshape(-1))
         if length == "long":
-            labels.append(row["label"])  # 元のラベルを保存
+            labels.append(row["label"])
         else:
-            labels.append(row["label_short"])  # 短いラベルを保存
-    force_feats = np.stack(force_feats)  # (N_samples, D)
-    labels_feats = np.stack(labels_feats)  # (N_samples, D)
-    # ───────────── UMAP 次元削減 ─────────────
+            labels.append(row["label_short"])
+
+    if len(force_feats) == 0:
+        raise RuntimeError(f"All segments were skipped (skipped={skipped}). Check eval.csv and segment lengths.")
+    if skipped > 0:
+        print(f"Warning: Skipped {skipped} segments due to insufficient length (< {data_len}).")
+
+    force_feats = np.stack(force_feats)  # (N, D)
+    labels_feats = np.stack(labels_feats)  # (N, D)
+    # UMAP dimensionality reduction
     reducer = umap.UMAP(random_state=42)
 
     if type == "textbase":
+        unique_labels_feats = np.unique(labels_feats, axis=0)
         embedding_labels_exclusive = reducer.fit_transform(
-            [labels_feats[0], labels_feats[1], labels_feats[2], labels_feats[4]]
-        )  # → (N, 2)
-        embedding_labels = reducer.transform(labels_feats)  # → (N, 2)
-        embedding_force = reducer.transform(force_feats)  # → (N, 2)
+            unique_labels_feats
+        )  # (N, 2)
+        embedding_labels = reducer.transform(labels_feats)  # (N, 2)
+        embedding_force = reducer.transform(force_feats)  # (N, 2)
     else:
-        embedding_force = reducer.fit_transform(force_feats)  # → (N, 2)
-        embedding_labels = reducer.transform(labels_feats)    # → (N, 2)
-    # ──────────── ここを追加 ────────────
-    # 各サンプルのラベルに対応する整数インデックスを作成
+        embedding_force = reducer.fit_transform(force_feats)  # (N, 2)
+        embedding_labels = reducer.transform(labels_feats)    # (N, 2)
+    # Map each sample label to an integer index
     unique_labels = sorted(set(labels))
     label_to_idx = {lbl: idx for idx, lbl in enumerate(unique_labels)}
     label_idxs = [label_to_idx[lbl] for lbl in labels]
-    # ───────────────────────────────────
 
-    # 散布図の描画
+    # Scatter plot
     scatter = plt.scatter(
         embedding_force[:, 0],
         embedding_force[:, 1],
@@ -177,17 +160,15 @@ def plotting(name, length="short", type="normal"):
         alpha=1.0,
     )
 
-    # ──────────── 凡例：ラベルごとの色 ────────────
     import matplotlib.patches as mpatches
 
-    # unique_labels はすでに定義済み
     color_handles = [
         mpatches.Patch(color=scatter.cmap(scatter.norm(idx)), label=lbl)
         for idx, lbl in enumerate(unique_labels)
     ]
     legend1 = plt.legend(
         handles=color_handles,
-        title="Labels",
+        title="Force embeddings",
         bbox_to_anchor=(1.05, 1),
         loc="upper left",
         borderaxespad=0.0,
@@ -196,7 +177,6 @@ def plotting(name, length="short", type="normal"):
     )
     plt.gca().add_artist(legend1)
 
-    # ──────────── 凡例：Text Embeddings マーカー ────────────
     from matplotlib.lines import Line2D
 
     text_handle = Line2D(
@@ -209,7 +189,6 @@ def plotting(name, length="short", type="normal"):
         label="Text Embeddings",
         linewidth=0,
     )
-    # 凡例を枠外（プロット右側下部）に配置
     legend2 = plt.legend(
         handles=[text_handle],
         bbox_to_anchor=(1.05, 0.1),
@@ -219,22 +198,20 @@ def plotting(name, length="short", type="normal"):
     )
     plt.gca().add_artist(legend2)
 
-    # plt.title("UMAP of Force Embeddings", fontsize=16)
-    # ──────────── 軸を非表示 ────────────
-    plt.xticks([])  # x 軸目盛りを消す
-    plt.yticks([])  # y 軸目盛りを消す
+    plt.xticks([])
+    plt.yticks([])
     plt.gca().spines['top'].set_visible(False)
     plt.gca().spines['right'].set_visible(False)
     # plt.gca().spines['bottom'].set_visible(False)
     # plt.gca().spines['left'].set_visible(False)
-    os.makedirs(f"data/{name}", exist_ok=True)
+    os.makedirs(f"data/results/clip/{mode}/{name}", exist_ok=True)
     if type == "textbase":
-        out_path = os.path.join(f"data/{name}", f"force_umap_{length}_textbase.png")
+        out_path = os.path.join(f"data/results/clip/{mode}/{name}", f"force_umap_{length}_textbase.png")
     else:
-        out_path = os.path.join(f"data/{name}", f"force_umap_{length}_normal.png")
+        out_path = os.path.join(f"data/results/clip/{mode}/{name}", f"force_umap_{length}_normal.png")
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"Saved UMAP of force embeddings → {out_path}")
-    plt.close()  # プロットを閉じる
+    plt.close()
 
 def main(name):
     """

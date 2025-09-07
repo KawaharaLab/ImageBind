@@ -27,6 +27,7 @@ dependencies = [
     "torch==1.13.1",
     "torchaudio>=0.13.1",
     "torchvision>=0.14.1",
+    "transformers>=4.56.1",
     "types-regex>=2024.11.6.20250403",
     "umap-learn>=0.5.7",
     "wandb>=0.19.11",
